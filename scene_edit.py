@@ -1,8 +1,8 @@
 from typing import Optional, List
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextDocument, QTextCursor, QTextCharFormat, QTextFormat, QFont
-from PyQt6.QtWidgets import QApplication, QTextEdit
+from PyQt6.QtGui import QTextDocument, QTextCursor, QTextCharFormat, QTextFormat, QFont, QIcon
+from PyQt6.QtWidgets import QApplication, QTextEdit, QFileDialog
 
 from logging_config import LoggingConfig
 
@@ -277,7 +277,7 @@ class NovelEditor(QTextEdit):
         return []
 
     def contextMenuEvent(self, event):
-        """Handle right-click with selection detection"""
+        """Handle right-click with file and construct-aware context menu"""
         mouse_pos = event.pos()
         cursor = self.cursorForPosition(mouse_pos)
         char_pos = cursor.position()
@@ -285,17 +285,22 @@ class NovelEditor(QTextEdit):
         # Get current selection info
         selection = self.textCursor()
         has_selection = selection.hasSelection()
-        in_selection = (has_selection and selection.selectionStart() <= char_pos <= selection.selectionEnd())
+        in_selection = (has_selection and
+                        selection.selectionStart() <= char_pos <= selection.selectionEnd())
 
-     # Get constructs at position
+        # Get constructs at position
         constructs = self._get_constructs_at_position(char_pos)
-        log.info(f"Constructs at position: {constructs}, "
-                 f"Right-click at {char_pos}, "
-                 f"Selection: {'YES' if has_selection else 'NO'}, "
-                 f"In selection: {'YES' if in_selection else 'NO'}")
 
         # Create context menu
         menu = super().createStandardContextMenu()
+
+        # Add File submenu at the top
+        file_menu = menu.addMenu("File")
+        file_menu.addSeparator()
+        file_menu.addAction(QIcon.fromTheme("document-open"), "Open...", self._handle_open)
+        file_menu.addAction(QIcon.fromTheme("document-save"), "Save", self._handle_save)
+        file_menu.addAction(QIcon.fromTheme("document-save-as"), "Save As...", self._handle_save_as)
+        menu.insertMenu(menu.actions()[0], file_menu)  # Insert at top
 
         # Add separator before our custom items
         menu.addSeparator()
@@ -324,13 +329,45 @@ class NovelEditor(QTextEdit):
 
             # Add removal option for innermost construct
             innermost = constructs[-1]
-            remove_action = constructs_menu.addAction(f"Remove {innermost}")
+            remove_action = constructs_menu.addAction(QIcon.fromTheme("edit-clear"), f"Remove {innermost}")
             remove_action.setData(innermost)  # Store construct name for handler
 
             if has_selection and in_selection:
                 constructs_menu.addSeparator()
 
         menu.exec(event.globalPos())
+
+    def _handle_open(self):
+        """Handle file open operation"""
+        filename, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Text Files (*.txt)")
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    self.setPlainText(f.read())
+            except Exception as e:
+                log.error(f"Error opening file: {e}")
+
+    def _handle_save(self):
+        """Handle file save operation"""
+        if not hasattr(self, '_current_file'):
+            self._handle_save_as()
+        else:
+            try:
+                with open(self._current_file, 'w', encoding='utf-8') as f:
+                    f.write(self.toPlainText())
+            except Exception as e:
+                log.error(f"Error saving file: {e}")
+
+    def _handle_save_as(self):
+        """Handle save as operation"""
+        filename, _ = QFileDialog.getSaveFileName(self, "Save File", "", "Text Files (*.txt)")
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(self.toPlainText())
+                self._current_file = filename
+            except Exception as e:
+                log.error(f"Error saving file: {e}")
 
 
 if __name__ == "__main__":
