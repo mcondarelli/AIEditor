@@ -300,9 +300,9 @@ class NovelEditor(QTextEdit):
         # Add separator before our custom items
         menu.addSeparator()
 
-        # Add Constructs menu item (always present but conditionally disabled)
-        constructs_action = menu.addAction("Constructs")
-        constructs_action.setEnabled(False)  # Default to disabled
+        # Create Constructs submenu
+        constructs_menu = menu.addMenu("Constructs")
+        constructs_menu.setEnabled(False)  # Default to disabled
 
         # Check if we should enable the menu item
         if has_selection and in_selection:
@@ -310,9 +310,25 @@ class NovelEditor(QTextEdit):
             start_constructs = self._get_constructs_at_position(selection.selectionStart())
             end_constructs = self._get_constructs_at_position(selection.selectionEnd())
             if start_constructs == end_constructs:
-                constructs_action.setEnabled(True)
-        elif constructs:  # No selection but inside a construct
-            constructs_action.setEnabled(True)
+                constructs_menu.setEnabled(True)
+
+                # Add wrapping options
+                wrap_menu = constructs_menu.addMenu("Wrap selection")
+                for construct in Construct.all():
+                    wrap_menu.addAction(construct.desc)
+
+                constructs_menu.addSeparator()
+
+        if constructs:  # Inside existing construct(s)
+            constructs_menu.setEnabled(True)
+
+            # Add removal option for innermost construct
+            innermost = constructs[-1]
+            remove_action = constructs_menu.addAction(f"Remove {innermost}")
+            remove_action.setData(innermost)  # Store construct name for handler
+
+            if has_selection and in_selection:
+                constructs_menu.addSeparator()
 
         menu.exec(event.globalPos())
 
