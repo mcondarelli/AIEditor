@@ -1,3 +1,5 @@
+from typing import Optional, List
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextDocument, QTextCursor, QTextCharFormat, QTextFormat, QFont
 from PyQt6.QtWidgets import QApplication, QTextEdit
@@ -50,6 +52,66 @@ class NovelDocument(QTextDocument):
 
     def setAnnotatedText(self, text):
         """Parse marked-up text using the specified algorithm"""
+
+        ### utility functions, they could be inlined but this improves readability
+        def find_next_boundary(pos: int) -> (int, str, Construct, bool):
+            """
+            Utility function to find next boundary in input text which could be:
+            - a Construct.beg marker
+            - a Construct.end marker
+            - EOL
+            :param pos: where to start searching in `text` (global, RO)
+            :return: a tuple containing:
+                     - pos of next char to scan (i.e.: beyond marker found
+                     - text between original pos and current boundary
+                     - construct boundary found (Construct or None if EOL)
+                     - bool indicating it's an opening or closing boundary (None if EOL)
+            """
+            log.debug(f'find_next_boundary({pos}): "{text[pos:].replace("\n", "\\n")}"')
+            next_boundary = text_length
+            const: Optional[Construct] = None
+            begin = None
+            # Check all possible construct starts
+            for _cons in Construct.all():
+                # Find start markers
+                index = text.find(_cons.beg, pos)
+                if index != -1 and index < next_boundary:
+                    next_boundary = index
+                    const = _cons
+                    begin = True
+
+                # Find end markers
+                index = text.find(_cons.end, pos)
+                if index != -1 and index < next_boundary:
+                    next_boundary = index
+                    const = _cons
+                    begin = False
+
+            # handle EOL special case: close all outstanding blocks
+            index = text.find('\n', pos)
+            if index != -1 and index < next_boundary:
+                next_boundary = index
+                const = None
+                begin = None
+
+            span_text = text[pos:next_boundary]
+            next_boundary += len(const.beg) if const and begin else len(const.end) if const else 1
+            return next_boundary, span_text, const, begin
+
+        def get_format(stack: List[str]) -> QTextFormat:
+            chr_fmt = QTextCharFormat()
+            # Apply construct formatting
+            for const in stack:
+                if const == 'Speech':
+                    chr_fmt.setForeground(Qt.GlobalColor.darkGreen)
+                elif const == 'Italic':
+                    chr_fmt.setFontItalic(True)
+                elif const == 'Bold':
+                    chr_fmt.setFontWeight(QFont.Weight.Bold)
+                elif const in SPECIAL_NAMES:
+                    chr_fmt.setForeground(Qt.GlobalColor.darkMagenta)
+            return chr_fmt
+
         log.debug('=============== setAnnotatedText() ================')
         self.clear()
         cursor = QTextCursor(self)
@@ -61,82 +123,53 @@ class NovelDocument(QTextDocument):
 
         while pos < text_length:
             # Find next construct boundary
-            log.debug(f'Searching next in "{text[pos:].replace("\n", "\\n")}"')
-            next_boundary = text_length
-            construct = None
-            begin = None
-            # Check all possible construct starts
-            for _cons in Construct.all():
-                # Find start markers
-                index = text.find(_cons.beg, pos)
-                if index != -1 and index < next_boundary:
-                    next_boundary = index
-                    construct = _cons
-                    begin = True
 
-                # Find end markers
-                index = text.find(_cons.end, pos)
-                if index != -1 and index < next_boundary:
-                    next_boundary = index
-                    construct = _cons
-                    begin = False
-
-            # handle EOL special case: close all outstanding blocks
-            index = text.find('\n', pos)
-            if index != -1 and index < next_boundary:
-                next_boundary = index + 1
-                construct = None
-                begin = None
-
-            # Handle text before boundary (step 3)
-            if next_boundary > pos:
-                current_text = text[pos:next_boundary]
+            pos, current_text, construct, begin = find_next_boundary(pos)
+            # Handle text before boundary it has to be emitted with "previous" formatting
+            if current_text:
+                # we have text, emit it with old visuals
                 current_name = '+'.join(stack)
-                char_format = QTextCharFormat()
+                char_format = get_format(stack)
                 char_format.setProperty(QTextFormat.Property.UserProperty, current_name)
-
-                # Apply construct formatting
-                for name in stack:
-                    if name == 'Speech':
-                        char_format.setForeground(Qt.GlobalColor.darkGreen)
-                    elif name == 'Italic':
-                        char_format.setFontItalic(True)
-                    elif name == 'Bold':
-                        char_format.setFontWeight(QFont.Weight.Bold)
-                    elif name in SPECIAL_NAMES:
-                        char_format.setForeground(Qt.GlobalColor.darkMagenta)
-
-                if construct is not None and construct.b_glyph:
-                        # Insert start glyph
-                        glyph_fmt = QTextCharFormat(char_format)
-                        glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
-                        cursor.insertText(construct.b_glyph, glyph_fmt)
                 cursor.insertText(current_text, char_format)
-                if construct is not None and construct.e_glyph:
-                    # insert end glyph
-                    glyph_fmt = QTextCharFormat(char_format)
-                    glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
-                    cursor.insertText(construct.e_glyph, glyph_fmt)
-
                 log.debug(f'Adding block [{current_name}]: "{current_text.replace("\n", "\\n")}"')
 
-            # in any case move after
-            pos = next_boundary
-
-            # then handle construct found
-            if construct is not None:
+            if construct:
                 if begin:
-                    pos += len(construct.beg)
+                    # begin tag: update stack and then emit
                     stack.append(construct.name)
+                    if construct.b_glyph:
+                        fmt = get_format(stack)
+                        # insert beg glyph
+                        fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                        cursor.insertText(construct.b_glyph, fmt)
                 else:
-                    pos += len(construct.end)
-                    top = stack.pop()
-                    if top != construct.name:
-                        log.error(f'expecting {top}, got {construct.end}')
-            elif begin is None:
+                    # end tag, emit it and then pop stack
+                    if construct.e_glyph:
+                        fmt = get_format(stack)
+                        # insert end glyph
+                        fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                        cursor.insertText(construct.e_glyph, fmt)
+                    if stack:
+                        top = stack.pop()
+                        if top != construct.name:
+                            log.error(f'expecting {top}, got {construct.end}')
+                    else:
+                        log.error(f'got unexpected {construct.end} (stack is empty)')
+            else:
+                # EOL, stack should be empty, if not emit all end glyphs
                 if stack:
-                    log.error(f'EOL with non-empty stack: {"+".join(stack)}')
-                    stack.clear()
+                    log.error(f'EOL with unterminated constructs')
+                    while stack:
+                        name = stack[-1]
+                        construct = Construct.by_name(name)
+                        if construct.e_glyph:
+                            fmt = get_format(stack)
+                            # insert end glyph
+                            fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                            cursor.insertText(construct.e_glyph, fmt)
+                        stack.pop()
+                cursor.insertText('\n')
 
         cursor.endEditBlock()
         log.debug('===================================================')
