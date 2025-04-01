@@ -1,24 +1,26 @@
-from multiprocessing.util import debug
-
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextDocument, QTextCursor, QTextCharFormat, QTextFormat, QFont
 from PyQt6.QtWidgets import QApplication, QTextEdit
 
 from logging_config import LoggingConfig
+
 log = LoggingConfig.get_logger('edit', _default=4)
 
 SPECIAL_NAMES = ['Afro', 'Isto', 'Thano', 'Posse', 'Zeo', 'Palla', 'Dionne', 'Dana', 'Fest', 'Ipno', 'Asclep', 'Opia']
+
+
 class Construct:
     _constructs = {}
 
     def __init__(self, name, beg, end, b_glyph='', e_glyph='', desc=None):
         if name in Construct._constructs:
             raise ValueError(f'Duplicate Construct name "{name}"')
-        # TODO: check also other parameters for uniqueness
         self.name = name
         self.beg = beg
         self.end = end
-        self.b_tag = f'<span class="{name}">'
+        self.b_glyph = b_glyph
+        self.e_glyph = e_glyph
+        self.b_tag = f'<span class="{name.lower()}">'
         self.e_tag = '</span>'
         self.desc = desc or name
         Construct._constructs[name] = self
@@ -32,11 +34,12 @@ class Construct:
         return cls._constructs.get(name)
 
 
-Construct('speech', '@q{', '}q@', '‟', '”', desc='Direct speech (quotes)')
+# Initialize constructs
+Construct('Speech', '@q{', '}q@', '‟', '”', desc='Direct speech (quotes)')
 for name in SPECIAL_NAMES:
-    Construct(name.lower(), f'@Q[{name}]{{', '}Q@', '«', '»', desc='Special speech (guillemots)')
-Construct('italic-txt', '@e{', '}e@', desc='Enhanced text (italics)')
-Construct('bold-txt', '@b{', '}b@', desc='Bold text')
+    Construct(name, f'@Q[{name}]{{', '}Q@', '«', '»', desc=f'Special quote ({name})')
+Construct('Italic', '@e{', '}e@', desc='Enhanced text (italics)')
+Construct('Bold', '@b{', '}b@', desc='Bold text')
 
 
 class NovelDocument(QTextDocument):
@@ -57,8 +60,8 @@ class NovelDocument(QTextDocument):
         text_length = len(text)
 
         while pos < text_length:
-            # Find next construct boundary (step 2)
-            log.debug(f'Searching next in "{text[pos:].replace('\n', '\\n')}"')
+            # Find next construct boundary
+            log.debug(f'Searching next in "{text[pos:].replace("\n", "\\n")}"')
             next_boundary = text_length
             construct = None
             begin = None
@@ -77,10 +80,11 @@ class NovelDocument(QTextDocument):
                     next_boundary = index
                     construct = _cons
                     begin = False
+
             # handle EOL special case: close all outstanding blocks
             index = text.find('\n', pos)
             if index != -1 and index < next_boundary:
-                next_boundary = index+1
+                next_boundary = index + 1
                 construct = None
                 begin = None
 
@@ -90,18 +94,20 @@ class NovelDocument(QTextDocument):
                 current_name = '+'.join(stack)
                 char_format = QTextCharFormat()
                 char_format.setProperty(QTextFormat.Property.UserProperty, current_name)
+
+                # Apply construct formatting
                 for name in stack:
-                    match name:
-                        case 'speech':
-                            char_format.setForeground(Qt.GlobalColor.darkGreen)
-                        case 'italic-txt':
-                            char_format.setFontItalic(True)
-                        case 'bold-txt':
-                            char_format.setFontWeight(QFont.Weight.Bold)
-                        case  'afro' | 'isto' | 'thano' | 'posse' | 'zeo' | 'palla' | 'dionne' | 'dana' | 'festo' | 'ipno' | 'asclep' | 'opia':
-                            char_format.setForeground(Qt.GlobalColor.darkMagenta)  # Add color for special quotes
+                    if name == 'Speech':
+                        char_format.setForeground(Qt.GlobalColor.darkGreen)
+                    elif name == 'Italic':
+                        char_format.setFontItalic(True)
+                    elif name == 'Bold':
+                        char_format.setFontWeight(QFont.Weight.Bold)
+                    elif name in SPECIAL_NAMES:
+                        char_format.setForeground(Qt.GlobalColor.darkMagenta)
+
                 cursor.insertText(current_text, char_format)
-                log.debug(f'Adding block [{current_name}]: "{current_text.replace('\n', '\\n')}"')
+                log.debug(f'Adding block [{current_name}]: "{current_text.replace("\n", "\\n")}"')
 
             # in any case move after
             pos = next_boundary
@@ -109,9 +115,24 @@ class NovelDocument(QTextDocument):
             # then handle construct found
             if construct is not None:
                 if begin:
+                    if construct.b_glyph:
+                        # Insert start glyph
+                        # TODO: glyph should have same visuals of included text
+                        glyph_fmt = QTextCharFormat()
+                        glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                        cursor.insertText(construct.b_glyph, glyph_fmt)
                     pos += len(construct.beg)
                     stack.append(construct.name)
                 else:
+                    if stack and construct.e_glyph:
+                        construct = Construct.by_name(stack[-1])
+                        if construct.e_glyph:
+                            # insert end glyph
+                            # TODO: glyph should have same visuals of included text
+                            glyph_fmt = QTextCharFormat()
+                            glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                            cursor.insertText(construct.e_glyph, glyph_fmt)
+
                     pos += len(construct.end)
                     top = stack.pop()
                     if top != construct.name:
@@ -134,14 +155,22 @@ class NovelDocument(QTextDocument):
         while block.isValid():
             iterator = block.begin()
             line = []
-            previous_fmt =  ''
+            prev_fmt = ''
+
             while not iterator.atEnd():
                 fragment = iterator.fragment()
+
+                fmt = fragment.charFormat()
+                # Skip glyph fragments
+                if fmt.property(QTextFormat.Property.UserProperty + 2):
+                    iterator += 1
+                    continue
+
                 txt = fragment.text()
-                fmt = fragment.charFormat().property(QTextFormat.Property.UserProperty) or ''
+                curr_fmt = fmt.property(QTextFormat.Property.UserProperty) or ''
                 # see if some construct should be cleaned
-                curr = fmt.split('+')
-                prev = previous_fmt.split('+')
+                curr = curr_fmt.split('+')
+                prev = prev_fmt.split('+')
                 for i in reversed(range(max(len(curr),len(prev)))):
                     prev_name = prev[i] if i < len(prev) else None
                     curr_name = curr[i] if i < len(curr) else None
@@ -150,18 +179,18 @@ class NovelDocument(QTextDocument):
                             # block end, close construct
                             construct = Construct.by_name(prev_name)
                             line.append(construct.end)
-                            log,debug(f'closing construct {prev_name}: {construct.end}')
+                            log.debug(f'Closing construct {prev_name}: {construct.end}')
                         if curr_name:
                             # new block, open construct
                             construct = Construct.by_name(curr_name)
                             line.append(construct.beg)
-                            log, debug(f'opening construct {curr_name}: {construct.beg}')
-                log.debug(f'Text: {txt}  construct: {fmt or "NONE"}')
+                            log.debug(f'Opening construct {curr_name}: {construct.beg}')
+                log.debug(f'Text: {txt}  construct: {curr_fmt or "NONE"}')
                 line.append(txt)
-                previous_fmt = fmt
+                prev_fmt = curr_fmt
                 iterator += 1
             # close remaining tags, if any
-            for name in reversed(previous_fmt.split('+')):
+            for name in reversed(prev_fmt.split('+')):
                 if name:
                     # new block, open construct
                     construct = Construct.by_name(name)
@@ -177,18 +206,20 @@ class NovelEditor(QTextEdit):
         super().__init__(parent)
         self._document = NovelDocument()
         self.setDocument(self._document)
-        
+
     def setPlainText(self, text):
         self._document.setAnnotatedText(text)
-        
+
     def toPlainText(self):
         return self._document.toAnnotatedText()
 
+
 if __name__ == "__main__":
     import sys
+
     LoggingConfig.configure()
     app = QApplication(sys.argv)
-    
+
     editor = NovelEditor()
     test_text = """Sample text
 @q{Direct speech}q@
@@ -199,11 +230,11 @@ Unclosed @q{construct
 Plain text line"""
     editor.setPlainText(test_text)
     editor.show()
-    
+
     # Verify round-trip conversion
     round_trip = editor.toPlainText()
     print("Original:", repr(test_text))
     print("Round-trip:", repr(round_trip))
     print("Match:", test_text == round_trip)
-    
+
     sys.exit(app.exec())
