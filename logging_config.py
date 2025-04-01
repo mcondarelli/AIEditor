@@ -64,13 +64,16 @@ class LoggingConfig:
             logger = logging.getLogger(name)
             logger.setLevel(cls.levels[min(level_num, len(cls.levels)-1)])
 
-            if not logger.handlers:
-                _format = config.get('format', f'%(asctime)s - {name} - %(levelname)s - %(message)s')
+            # Remove all existing handlers
+            for handler in logger.handlers[:]:
+                logger.removeHandler(handler)
 
-                handler = logging.StreamHandler()
-                formatter = logging.Formatter(_format)
-                handler.setFormatter(formatter)
-                logger.addHandler(handler)
+            # Add new handler with configured format
+            _format = config['format'] or f'%(asctime)s - {name} - %(levelname)s - %(message)s'
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(_format)
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
             print(logger)
         return remaining
 
