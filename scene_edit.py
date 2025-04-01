@@ -230,6 +230,7 @@ class NovelDocument(QTextDocument):
         log.debug('===================================================')
         return '\n'.join(text)
 
+
 class NovelEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -242,7 +243,58 @@ class NovelEditor(QTextEdit):
     def toPlainText(self):
         return self._document.toAnnotatedText()
 
+    def _print_all_fragments(self):
+        block = self.document().begin()
+        while block.isValid():
+            iterator = block.begin()
+            log.debug(f'*** Block {block.text()}')
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                fmt = fragment.charFormat()
+                txt = fragment.text()
+                curr_fmt = fmt.property(QTextFormat.Property.UserProperty) or ''
+                curr = curr_fmt.split('+')
+                log.debug(f'    Fragment {curr} {txt}')
 
+                iterator += 1
+            block = block.next()
+
+
+    def _get_constructs_at_position(self, pos):
+        """Get construct stack at given position"""
+        block = self.document().findBlock(pos)
+        # Move to the fragment containing the position
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            frag_start = fragment.position()
+            frag_end = frag_start + fragment.length()
+            if frag_start <= pos < frag_end:
+                fmt = fragment.charFormat()
+                current_stack = fmt.property(QTextFormat.Property.UserProperty) or ''
+                return current_stack.split('+') if current_stack else []
+            iterator += 1
+        return []
+
+    def contextMenuEvent(self, event):
+        """Handle right-click with selection detection"""
+        mouse_pos = event.pos()
+        cursor = self.cursorForPosition(mouse_pos)
+        char_pos = cursor.position()
+
+        # Get current selection info
+        selection = self.textCursor()
+        has_selection = selection.hasSelection()
+        in_selection = (has_selection and selection.selectionStart() <= char_pos <= selection.selectionEnd())
+
+     # Get constructs at position
+        constructs = self._get_constructs_at_position(char_pos)
+        log.info(f"Constructs at position: {constructs}, "
+                 f"Right-click at {char_pos}, "
+                 f"Selection: {'YES' if has_selection else 'NO'}, "
+                 f"In selection: {'YES' if in_selection else 'NO'}")
+
+        super().contextMenuEvent(event)
 if __name__ == "__main__":
     import sys
 
