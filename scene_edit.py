@@ -106,7 +106,18 @@ class NovelDocument(QTextDocument):
                     elif name in SPECIAL_NAMES:
                         char_format.setForeground(Qt.GlobalColor.darkMagenta)
 
+                if construct is not None and construct.b_glyph:
+                        # Insert start glyph
+                        glyph_fmt = QTextCharFormat(char_format)
+                        glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                        cursor.insertText(construct.b_glyph, glyph_fmt)
                 cursor.insertText(current_text, char_format)
+                if construct is not None and construct.e_glyph:
+                    # insert end glyph
+                    glyph_fmt = QTextCharFormat(char_format)
+                    glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
+                    cursor.insertText(construct.e_glyph, glyph_fmt)
+
                 log.debug(f'Adding block [{current_name}]: "{current_text.replace("\n", "\\n")}"')
 
             # in any case move after
@@ -115,24 +126,9 @@ class NovelDocument(QTextDocument):
             # then handle construct found
             if construct is not None:
                 if begin:
-                    if construct.b_glyph:
-                        # Insert start glyph
-                        # TODO: glyph should have same visuals of included text
-                        glyph_fmt = QTextCharFormat()
-                        glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
-                        cursor.insertText(construct.b_glyph, glyph_fmt)
                     pos += len(construct.beg)
                     stack.append(construct.name)
                 else:
-                    if stack and construct.e_glyph:
-                        construct = Construct.by_name(stack[-1])
-                        if construct.e_glyph:
-                            # insert end glyph
-                            # TODO: glyph should have same visuals of included text
-                            glyph_fmt = QTextCharFormat()
-                            glyph_fmt.setProperty(QTextFormat.Property.UserProperty + 2, True)
-                            cursor.insertText(construct.e_glyph, glyph_fmt)
-
                     pos += len(construct.end)
                     top = stack.pop()
                     if top != construct.name:
