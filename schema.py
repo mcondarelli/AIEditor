@@ -61,6 +61,7 @@ def init_db(db_path="AIEditor.sqlite3"):
         feedback_type TEXT NOT NULL,
         feedback_text TEXT NOT NULL,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_pending BOOLEAN DEFAULT 0,
         FOREIGN KEY (scene_id) REFERENCES scenes(id) ON DELETE CASCADE
     )""")
 

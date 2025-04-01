@@ -2,7 +2,7 @@ import requests
 
 from logging_config import LoggingConfig
 
-log = LoggingConfig.get_logger('AI', _default=4)
+log = LoggingConfig.get_logger('_AI_', _default=4)
 
 # Llama.cpp server details
 LLAMA_SERVER_URL = "http://192.168.7.13:9070/completion"
@@ -63,11 +63,13 @@ def ai_ask_commentary(scene_text):
     }
 
     try:
+        log.debug('Request sent')
         response = requests.post(LLAMA_SERVER_URL, json=payload)
+        log.debug('Response received')
         response.raise_for_status()
         comment = response.json().get("content", "").strip()
     except requests.exceptions.RequestException as e:
-        print(f"Error connecting to llama-server: {e}")
+        log.error(f"Error connecting to llama-server: {e}")
         comment = "Errore: impossibile analizzare il testo."
     return comment
 
