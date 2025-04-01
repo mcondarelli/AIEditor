@@ -294,7 +294,29 @@ class NovelEditor(QTextEdit):
                  f"Selection: {'YES' if has_selection else 'NO'}, "
                  f"In selection: {'YES' if in_selection else 'NO'}")
 
-        super().contextMenuEvent(event)
+        # Create context menu
+        menu = super().createStandardContextMenu()
+
+        # Add separator before our custom items
+        menu.addSeparator()
+
+        # Add Constructs menu item (always present but conditionally disabled)
+        constructs_action = menu.addAction("Constructs")
+        constructs_action.setEnabled(False)  # Default to disabled
+
+        # Check if we should enable the menu item
+        if has_selection and in_selection:
+            # Check if selection is properly nested
+            start_constructs = self._get_constructs_at_position(selection.selectionStart())
+            end_constructs = self._get_constructs_at_position(selection.selectionEnd())
+            if start_constructs == end_constructs:
+                constructs_action.setEnabled(True)
+        elif constructs:  # No selection but inside a construct
+            constructs_action.setEnabled(True)
+
+        menu.exec(event.globalPos())
+
+
 if __name__ == "__main__":
     import sys
 
