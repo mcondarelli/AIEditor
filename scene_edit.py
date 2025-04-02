@@ -14,7 +14,7 @@ SPECIAL_NAMES = ['Afro', 'Isto', 'Thano', 'Posse', 'Zeo', 'Palla', 'Dionne', 'Da
 class Construct:
     _constructs = {}
 
-    def __init__(self, name, beg, end, b_glyph='', e_glyph='', desc=None):
+    def __init__(self, name, beg, end, b_glyph='', e_glyph='', desc=None, icon=None):
         if name in Construct._constructs:
             raise ValueError(f'Duplicate Construct name "{name}"')
         self.name = name
@@ -25,6 +25,7 @@ class Construct:
         self.b_tag = f'<span class="{name.lower()}">'
         self.e_tag = '</span>'
         self.desc = desc or name
+        self.icon = icon or 'dialog-question'
         Construct._constructs[name] = self
 
     @classmethod
@@ -276,6 +277,112 @@ class NovelEditor(QTextEdit):
             iterator += 1
         return []
 
+    def _wrap_selection(self, construct_name):
+        """Wrap selection with construct formatting at document level"""
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return
+
+        construct = Construct.by_name(construct_name)
+        if not construct:
+            log.error(f"Unknown construct: {construct_name}")
+            return
+
+        # Validate selection nesting
+        start_constructs = self._get_constructs_at_position(cursor.selectionStart())
+        end_constructs = self._get_constructs_at_position(cursor.selectionEnd())
+        if start_constructs != end_constructs:
+            log.error("Cannot wrap selection across construct boundaries")
+            return
+
+        selected_text = cursor.selectedText()
+        original_position = cursor.position()
+
+        cursor.beginEditBlock()
+
+        # 1. Apply construct formatting to selection
+        new_stack = start_constructs + [construct.name]
+        char_format = self._create_char_format(new_stack)
+        cursor.mergeCharFormat(char_format)
+
+        # 2. Insert glyphs if needed
+        if construct.b_glyph:
+            glyph_format = self._create_char_format(new_stack)
+            glyph_format.setProperty(QTextFormat.Property.UserProperty + 2, True)
+            cursor.setPosition(cursor.selectionStart())
+            cursor.insertText(construct.b_glyph, glyph_format)
+            cursor.setPosition(cursor.selectionEnd() + len(construct.b_glyph))
+            cursor.insertText(construct.e_glyph, glyph_format)
+
+        cursor.endEditBlock()
+        cursor.setPosition(original_position)
+        self.setTextCursor(cursor)
+
+    def _create_char_format(self, construct_stack):
+        """Create QTextCharFormat for given construct stack"""
+        char_format = QTextCharFormat()
+        for const in construct_stack:
+            if const == 'Speech':
+                char_format.setForeground(Qt.GlobalColor.darkGreen)
+            elif const == 'Italic':
+                char_format.setFontItalic(True)
+            elif const == 'Bold':
+                char_format.setFontWeight(QFont.Weight.Bold)
+            elif const in SPECIAL_NAMES:
+                char_format.setForeground(Qt.GlobalColor.darkMagenta)
+        char_format.setProperty(QTextFormat.Property.UserProperty, '+'.join(construct_stack))
+        return char_format
+
+    def _unwrap_construct(self, construct_name, pos):
+        block = self.document().findBlock(pos)
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            if fragment.position() <= pos < fragment.position() + fragment.length():
+                fmt = fragment.charFormat()
+                current_stack = (fmt.property(QTextFormat.Property.UserProperty) or '').split('+')
+                # Fast path - construct_name is guaranteed to be last in stack
+                if current_stack and current_stack[-1] == construct_name:
+                    text = fragment.text()
+                    cursor = QTextCursor(self.document())
+                    cursor.beginEditBlock()
+                    cursor.setPosition(fragment.position())
+                    cursor.setPosition(fragment.position() + fragment.length(),
+                                       QTextCursor.MoveMode.KeepAnchor)
+                    cursor.removeSelectedText()
+
+                    # Only apply format if nested (parent exists)
+                    if len(current_stack) > 1:
+                        parent_fmt = self._create_char_format(current_stack[:-1])
+                        cursor.insertText(text, parent_fmt)
+                    else:
+                        cursor.insertText(text)
+                    cursor.endEditBlock()
+                return
+            iterator += 1
+
+    def _find_construct_boundaries(self, pos, construct_name):
+        """Return (start, end) positions of construct excluding markers"""
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(pos)
+
+        # Search backward for construct start
+        start_pos = -1
+        while cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter):
+            if self._get_constructs_at_position(cursor.position()) == [construct_name]:
+                start_pos = cursor.position()
+                break
+
+        # Search forward for construct end
+        end_pos = -1
+        cursor.setPosition(pos)
+        while cursor.movePosition(QTextCursor.MoveOperation.NextCharacter):
+            if construct_name not in self._get_constructs_at_position(cursor.position()):
+                end_pos = cursor.position()
+                break
+
+        return start_pos, end_pos
+
     def contextMenuEvent(self, event):
         """Handle right-click with file and construct-aware context menu"""
         mouse_pos = event.pos()
@@ -320,8 +427,11 @@ class NovelEditor(QTextEdit):
                 # Add wrapping options
                 wrap_menu = constructs_menu.addMenu("Wrap selection")
                 for construct in Construct.all():
-                    wrap_menu.addAction(construct.desc)
-
+                    wrap_menu.addAction(
+                        QIcon.fromTheme(construct.icon),
+                        construct.desc,
+                        lambda c=construct.name: self._wrap_selection(c)
+                    )
                 constructs_menu.addSeparator()
 
         if constructs:  # Inside existing construct(s)
@@ -329,7 +439,11 @@ class NovelEditor(QTextEdit):
 
             # Add removal option for innermost construct
             innermost = constructs[-1]
-            remove_action = constructs_menu.addAction(QIcon.fromTheme("edit-clear"), f"Remove {innermost}")
+            remove_action = constructs_menu.addAction(
+                QIcon.fromTheme("edit-clear"),
+                f"Remove {innermost}",
+                lambda: self._unwrap_construct(innermost, char_pos)
+            )
             remove_action.setData(innermost)  # Store construct name for handler
 
             if has_selection and in_selection:
