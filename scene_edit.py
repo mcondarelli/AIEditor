@@ -278,7 +278,7 @@ class NovelEditor(QTextEdit):
         return []
 
     def _wrap_selection(self, construct_name):
-        """Wrap selection with construct formatting at document level"""
+        """Wrap selection with construct formatting and glyphs"""
         cursor = self.textCursor()
         if not cursor.hasSelection():
             return
@@ -295,28 +295,31 @@ class NovelEditor(QTextEdit):
             log.error("Cannot wrap selection across construct boundaries")
             return
 
-        selected_text = cursor.selectedText()
-        original_position = cursor.position()
+        # Save positions before modifications
+        sel_start = cursor.selectionStart()
+        sel_end = cursor.selectionEnd()
+        new_stack = start_constructs + [construct.name]
 
         cursor.beginEditBlock()
 
         # 1. Apply construct formatting to selection
-        new_stack = start_constructs + [construct.name]
         char_format = self._create_char_format(new_stack)
         cursor.mergeCharFormat(char_format)
 
-        # 2. Insert glyphs if needed
+        # 2. Insert glyphs if needed (in reverse order to avoid position shifting)
         if construct.b_glyph:
             glyph_format = self._create_char_format(new_stack)
             glyph_format.setProperty(QTextFormat.Property.UserProperty + 2, True)
-            cursor.setPosition(cursor.selectionStart())
-            cursor.insertText(construct.b_glyph, glyph_format)
-            cursor.setPosition(cursor.selectionEnd() + len(construct.b_glyph))
+
+            # Insert end glyph first
+            cursor.setPosition(sel_end)
             cursor.insertText(construct.e_glyph, glyph_format)
 
+            # Then insert begin glyph
+            cursor.setPosition(sel_start)
+            cursor.insertText(construct.b_glyph, glyph_format)
+
         cursor.endEditBlock()
-        cursor.setPosition(original_position)
-        self.setTextCursor(cursor)
 
     def _create_char_format(self, construct_stack):
         """Create QTextCharFormat for given construct stack"""
