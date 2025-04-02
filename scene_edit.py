@@ -344,6 +344,7 @@ class NovelEditor(QTextEdit):
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     self.setPlainText(f.read())
+                    self._current_file = filename
             except Exception as e:
                 log.error(f"Error opening file: {e}")
 
