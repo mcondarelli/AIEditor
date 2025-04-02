@@ -298,6 +298,42 @@ class NovelDocument(QTextDocument):
             return True
         return False
 
+    def handle_boundary_editing(self, cursor, is_backspace=True):
+        """Handle keyboard edits at glyph boundaries. Returns True if handled."""
+        pos = cursor.position()
+        fragment = self._get_fragment_at_position(pos - 1 if is_backspace else pos)
+
+        if fragment and fragment.charFormat().property(QTextFormat.Property.UserProperty + 2):
+            # Skip glyph during deletion
+            new_pos = fragment.position() if is_backspace else fragment.position() + fragment.length()
+            cursor.setPosition(new_pos)
+            return True
+        return False
+
+    def validate_inserted_text(self, start_pos, text):
+        """Ensure inserted text doesn't land in glyph fragments"""
+        cursor = QTextCursor(self)
+        cursor.beginEditBlock()
+
+        try:
+            for i in reversed(range(len(text))):  # Process backwards to maintain positions
+                pos = start_pos + i
+                fragment = self._get_fragment_at_position(pos)
+
+                if fragment and fragment.charFormat().property(QTextFormat.Property.UserProperty + 2):
+                    # Move character after glyph
+                    cursor.setPosition(pos)
+                    cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 1)
+                    char = cursor.selectedText()
+                    cursor.removeSelectedText()
+
+                    new_pos = fragment.position() + fragment.length()
+                    cursor.setPosition(new_pos)
+                    fmt = self.get_format_for_insertion(new_pos)
+                    cursor.insertText(char, fmt)
+        finally:
+            cursor.endEditBlock()
+
     def validate_text_insertion(self, insert_pos, text):
         """Fix text inserted into invalid positions"""
         cursor = QTextCursor(self)
@@ -362,22 +398,33 @@ class NovelEditor(QTextEdit):
             iterator += 1
 
     def keyPressEvent(self, event):
-        # Handle deletion keys
+        # Handle boundary deletions
         if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             cursor = self.textCursor()
-            if self._document.handle_boundary_deletion(cursor, event.key() == Qt.Key.Key_Backspace):
+            if self._document.handle_boundary_editing(
+                cursor,
+                event.key() == Qt.Key.Key_Backspace
+            ):
                 self.setTextCursor(cursor)
                 return
 
         # Handle text insertion
-        elif event.text():
+        if event.text():
             cursor = self.textCursor()
-            insert_pos = cursor.position()
+            start_pos = cursor.position()
             super().keyPressEvent(event)
-            self._document.validate_text_insertion(insert_pos, event.text())
+            self._document.validate_inserted_text(start_pos, event.text())
             return
 
         super().keyPressEvent(event)
+
+    def insertFromMimeData(self, source):
+        """Handle paste operations with glyph protection"""
+        cursor = self.textCursor()
+        start_pos = cursor.position()
+        super().insertFromMimeData(source)
+        if source.text():
+            self._document.validate_inserted_text(start_pos, source.text())
 
     def deleteSelectedText(self):
         """Handle selection deletion with glyph protection"""
@@ -410,19 +457,6 @@ class NovelEditor(QTextEdit):
                 block = block.next()
 
         super().deleteSelectedText()
-
-    def insertFromMimeData(self, source):
-        """Handle paste operations with glyph protection"""
-        cursor = self.textCursor()
-        self._last_insert_pos = cursor.position()
-        super().insertFromMimeData(source)
-        if self._last_insert_pos is not None:
-            # For paste, we need to check the whole inserted range
-            cursor.setPosition(self._last_insert_pos)
-            cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor,
-                                len(source.text()))
-            self._validate_insertion(self._last_insert_pos, len(source.text()))
-            self._last_insert_pos = None
 
     def _validate_insertion(self, insert_pos, insert_length):
         """Fix text inserted into glyph fragments"""
