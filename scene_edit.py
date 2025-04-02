@@ -231,18 +231,235 @@ class NovelDocument(QTextDocument):
         log.debug('===================================================')
         return '\n'.join(text)
 
+    def _get_fragment_at_position(self, pos):
+        """Get fragment at exact position (returns None if not found)"""
+        block = self.findBlock(pos)
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            if fragment.position() <= pos < fragment.position() + fragment.length():
+                return fragment
+            iterator += 1
+        return None
+
+    def get_format_for_insertion(self, pos):
+        """
+        Get proper format for text insertion at position
+        Handles EOL and glyph boundaries correctly
+        """
+        cursor = QTextCursor(self)
+        cursor.setPosition(pos)
+
+        # Case 1: At document end
+        if pos >= self.characterCount() - 1:
+            return QTextCharFormat()
+
+        # Case 2: Check next character
+        next_cursor = QTextCursor(cursor)
+        next_cursor.movePosition(QTextCursor.MoveOperation.Right)
+
+        # Check for EOL
+        if next_cursor.block() != cursor.block():
+            return self._get_parent_format(cursor)
+
+        # Check for glyph
+        next_fragment = self._get_fragment_at_position(next_cursor.position())
+        if (next_fragment and
+                next_fragment.charFormat().property(QTextFormat.Property.UserProperty + 2)):
+            return self._get_parent_format(cursor)
+
+        # Default case
+        return next_cursor.charFormat()
+
+    def _get_parent_format(self, cursor):
+        """Get parent format when between constructs or glyphs"""
+        if cursor.positionInBlock() > 0:
+            prev_cursor = QTextCursor(cursor)
+            prev_cursor.movePosition(QTextCursor.MoveOperation.Left)
+            prev_fmt = prev_cursor.charFormat()
+            stack = (prev_fmt.property(QTextFormat.Property.UserProperty) or '').split('+')
+            if len(stack) > 1:
+                return self._create_char_format(stack[:-1])
+        return QTextCharFormat()
+
+    def handle_boundary_deletion(self, cursor, is_backspace):
+        """Handle deletion at glyph boundaries"""
+        pos = cursor.position()
+        direction = QTextCursor.MoveOperation.Left if is_backspace else QTextCursor.MoveOperation.Right
+
+        # Get adjacent fragment
+        check_pos = pos - 1 if is_backspace else pos
+        fragment = self._get_fragment_at_position(check_pos)
+
+        if fragment and fragment.charFormat().property(QTextFormat.Property.UserProperty + 2):
+            # Skip glyph during deletion
+            new_pos = fragment.position() if is_backspace else fragment.position() + fragment.length()
+            cursor.setPosition(new_pos)
+            return True
+        return False
+
+    def validate_text_insertion(self, insert_pos, text):
+        """Fix text inserted into invalid positions"""
+        cursor = QTextCursor(self)
+        cursor.setPosition(insert_pos)
+
+        for i in range(len(text)):
+            pos = insert_pos + i
+            fragment = self._get_fragment_at_position(pos)
+
+            if fragment and fragment.charFormat().property(QTextFormat.Property.UserProperty + 2):
+                # Remove from glyph fragment
+                cursor.setPosition(pos)
+                cursor.movePosition(QTextCursor.MoveOperation.Right,
+                                    QTextCursor.MoveMode.KeepAnchor, 1)
+                char = cursor.selectedText()
+
+                cursor.beginEditBlock()
+                cursor.removeSelectedText()
+
+                # Insert after glyph with proper format
+                cursor.setPosition(fragment.position() + fragment.length())
+                fmt = self.get_format_for_insertion(cursor.position())
+                cursor.insertText(char, fmt)
+                cursor.endEditBlock()
+
 
 class NovelEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._document = NovelDocument()
         self.setDocument(self._document)
+        self._last_insert_pos = None
+        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+
+        # Connect signals
+        self.cursorPositionChanged.connect(self._handle_cursor_movement)
 
     def setPlainText(self, text):
         self._document.setAnnotatedText(text)
 
     def toPlainText(self):
         return self._document.toAnnotatedText()
+
+    def _handle_cursor_movement(self):
+        """Prevent cursor from stopping inside glyphs"""
+        cursor = self.textCursor()
+        pos = cursor.position()
+
+        # Check if we're inside a glyph fragment
+        block = self._document.findBlock(pos)
+        iterator = block.begin()
+
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            if fragment.position() < pos < fragment.position() + fragment.length():
+                fmt = fragment.charFormat()
+                if fmt.property(QTextFormat.Property.UserProperty + 2):  # Is glyph
+                    # Move cursor to after glyph
+                    cursor.setPosition(fragment.position() + fragment.length())
+                    self.setTextCursor(cursor)
+                    break
+            iterator += 1
+
+    def keyPressEvent(self, event):
+        # Handle deletion keys
+        if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            cursor = self.textCursor()
+            if self._document.handle_boundary_deletion(cursor, event.key() == Qt.Key.Key_Backspace):
+                self.setTextCursor(cursor)
+                return
+
+        # Handle text insertion
+        elif event.text():
+            cursor = self.textCursor()
+            insert_pos = cursor.position()
+            super().keyPressEvent(event)
+            self._document.validate_text_insertion(insert_pos, event.text())
+            return
+
+        super().keyPressEvent(event)
+
+    def deleteSelectedText(self):
+        """Handle selection deletion with glyph protection"""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            # Check if selection contains glyphs
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            block = self._document.findBlock(start)
+
+            while block.isValid() and block.position() <= end:
+                iterator = block.begin()
+                while not iterator.atEnd():
+                    fragment = iterator.fragment()
+                    if (fragment.position() < end and
+                            fragment.position() + fragment.length() > start and
+                            fragment.charFormat().property(QTextFormat.Property.UserProperty + 2)):
+                        # Skip glyphs in selection
+                        if fragment.position() < start:
+                            cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
+                            cursor.setPosition(fragment.position() + fragment.length(),
+                                               QTextCursor.MoveMode.KeepAnchor)
+                        if fragment.position() + fragment.length() > end:
+                            cursor.setPosition(end, QTextCursor.MoveMode.MoveAnchor)
+                            cursor.setPosition(fragment.position(),
+                                               QTextCursor.MoveMode.KeepAnchor)
+                        iterator += 1
+                        continue
+                    iterator += 1
+                block = block.next()
+
+        super().deleteSelectedText()
+
+    def insertFromMimeData(self, source):
+        """Handle paste operations with glyph protection"""
+        cursor = self.textCursor()
+        self._last_insert_pos = cursor.position()
+        super().insertFromMimeData(source)
+        if self._last_insert_pos is not None:
+            # For paste, we need to check the whole inserted range
+            cursor.setPosition(self._last_insert_pos)
+            cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor,
+                                len(source.text()))
+            self._validate_insertion(self._last_insert_pos, len(source.text()))
+            self._last_insert_pos = None
+
+    def _validate_insertion(self, insert_pos, insert_length):
+        """Fix text inserted into glyph fragments"""
+        cursor = QTextCursor(self._document)
+        cursor.setPosition(insert_pos)
+
+        for i in range(insert_length):
+            pos = insert_pos + i
+            cursor.setPosition(pos)
+            fragment = self._document._get_fragment_at_position(pos)
+
+            if fragment and fragment.charFormat().property(QTextFormat.Property.UserProperty + 2):
+                # Move this character after glyph with proper format
+                char_cursor = QTextCursor(self._document)
+                char_cursor.setPosition(pos)
+                char_cursor.movePosition(QTextCursor.MoveOperation.Right,
+                                         QTextCursor.MoveMode.KeepAnchor, 1)
+                text = char_cursor.selectedText()
+
+                char_cursor.beginEditBlock()
+                char_cursor.removeSelectedText()
+
+                # Insert after glyph with context-aware format
+                char_cursor.setPosition(fragment.position() + fragment.length())
+                fmt = self._document.get_format_for_insertion(char_cursor.position())
+                char_cursor.insertText(text, fmt)
+                char_cursor.endEditBlock()
+
+    def _get_format_at_position(self, pos):
+        """Get character format at given position"""
+        cursor = QTextCursor(self._document)
+        cursor.setPosition(pos)
+        if pos < self._document.characterCount() - 1:
+            cursor.movePosition(QTextCursor.MoveOperation.Right,
+                                QTextCursor.MoveMode.KeepAnchor, 1)
+            return cursor.charFormat()
+        return QTextCharFormat()  # Default format at end
 
     def _print_all_fragments(self):
         block = self.document().begin()
