@@ -2,7 +2,7 @@ from typing import Optional, List
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextDocument, QTextCursor, QTextCharFormat, QTextFormat, QFont, QIcon
-from PyQt6.QtWidgets import QApplication, QTextEdit, QFileDialog
+from PyQt6.QtWidgets import QApplication, QTextEdit, QFileDialog, QMessageBox
 
 from logging_config import LoggingConfig
 
@@ -359,43 +359,99 @@ class NovelDocument(QTextDocument):
                 cursor.insertText(char, fmt)
                 cursor.endEditBlock()
 
+    def setPlainText(self, text):
+        """Override to force annotated text handling"""
+        self.setAnnotatedText(text)
+
+    def toPlainText(self):
+        """Override to force annotated text handling"""
+        return self.toAnnotatedText()
+
 
 class NovelEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._document = NovelDocument()
         self.setDocument(self._document)
-        self._last_insert_pos = None
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._is_dirty = False
+        self._document.contentsChanged.connect(self._mark_dirty)
 
-        # Connect signals
-        self.cursorPositionChanged.connect(self._handle_cursor_movement)
+        # Remove plaintext methods from public API
+        self.setPlainText = self._hidden_set_plaintext
+        self.toPlainText = self._hidden_to_plaintext
+
+    def _hidden_set_plaintext(self, *args, **kwargs):
+        """Prevent direct plaintext access"""
+        raise AttributeError("Use setAnnotatedText() instead of setPlainText()")
+
+    def _hidden_to_plaintext(self, *args, **kwargs):
+        """Prevent direct plaintext access"""
+        raise AttributeError("Use toAnnotatedText() instead of toPlainText()")
+
+    def setAnnotatedText(self, text):
+        """Public method for setting annotated text"""
+        self._document.setAnnotatedText(text)
+        self._clear_dirty()
+
+    def toAnnotatedText(self):
+        """Public method for getting annotated text"""
+        return self._document.toAnnotatedText()
+
+    def _mark_dirty(self):
+        """Mark buffer as modified"""
+        self._is_dirty = True
+
+    def _clear_dirty(self):
+        """Clear dirty flag"""
+        self._is_dirty = False
+
+    def maybe_save(self):
+        """
+        Prompt to save if buffer is dirty.
+        Returns QMessageBox.StandardButton:
+            Yes - saved successfully
+            No - discard changes
+            Cancel - abort operation
+        """
+        if not self._is_dirty:
+            return QMessageBox.StandardButton.Yes
+
+        reply = QMessageBox.question(
+            self,
+            "Unsaved Changes",
+            "The document has been modified. Save changes?",
+            QMessageBox.StandardButton.Yes |
+            QMessageBox.StandardButton.No |
+            QMessageBox.StandardButton.Cancel
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            if self._document.save_file():
+                self._clear_dirty()
+                return QMessageBox.StandardButton.Yes
+            return QMessageBox.StandardButton.Cancel
+
+        elif reply == QMessageBox.StandardButton.No:
+            self._clear_dirty()
+            return QMessageBox.StandardButton.No
+
+        return QMessageBox.StandardButton.Cancel
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        if self.maybe_save() == QMessageBox.StandardButton.Cancel:
+            event.ignore()
+        else:
+            event.accept()
 
     def setPlainText(self, text):
+        """Override to clear dirty flag"""
         self._document.setAnnotatedText(text)
+        self._clear_dirty()
 
     def toPlainText(self):
         return self._document.toAnnotatedText()
-
-    def _handle_cursor_movement(self):
-        """Prevent cursor from stopping inside glyphs"""
-        cursor = self.textCursor()
-        pos = cursor.position()
-
-        # Check if we're inside a glyph fragment
-        block = self._document.findBlock(pos)
-        iterator = block.begin()
-
-        while not iterator.atEnd():
-            fragment = iterator.fragment()
-            if fragment.position() < pos < fragment.position() + fragment.length():
-                fmt = fragment.charFormat()
-                if fmt.property(QTextFormat.Property.UserProperty + 2):  # Is glyph
-                    # Move cursor to after glyph
-                    cursor.setPosition(fragment.position() + fragment.length())
-                    self.setTextCursor(cursor)
-                    break
-            iterator += 1
 
     def keyPressEvent(self, event):
         # Handle boundary deletions
@@ -707,11 +763,14 @@ class NovelEditor(QTextEdit):
 
     def _handle_open(self):
         """Handle file open operation"""
+        if self.maybe_save() == QMessageBox.StandardButton.Cancel:
+            return
+
         filename, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Text Files (*.txt)")
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
-                    self.setPlainText(f.read())
+                    self.setAnnotatedText(f.read())
                     self._current_file = filename
             except Exception as e:
                 log.error(f"Error opening file: {e}")
@@ -753,11 +812,11 @@ if __name__ == "__main__":
 @q{Outer speech @q{inner speech}q@ continues}q@
 Unclosed @q{construct
 Plain text line"""
-    editor.setPlainText(test_text)
+    editor.setAnnotatedText(test_text)
     editor.show()
 
     # Verify round-trip conversion
-    round_trip = editor.toPlainText()
+    round_trip = editor.toAnnotatedText()
     print("Original:", repr(test_text))
     print("Round-trip:", repr(round_trip))
     print("Match:", test_text == round_trip)
