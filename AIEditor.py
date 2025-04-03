@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QMainWindow, QHBoxLayout, QComboBox, QVBoxLayout,
 
 from scene_edit import NovelEditor
 from io_utils import export_to_legacy_json
-from ai_utils import ai_ask_commentary
+from ai_utils import analyze_style
 from logging_config import LoggingConfig
 from schema import init_db
 
@@ -23,6 +23,24 @@ class AIWorkerSignals(QObject):
     result = pyqtSignal(int, str)  # scene_id, commentary
     finished = pyqtSignal()
     error = pyqtSignal(str)
+
+
+class SceneAnalyzer(QObject):
+    finished = pyqtSignal(int, str)  # scene_id, commentary
+    error = pyqtSignal(str)
+
+    def __init__(self, scene_id, scene_text):
+        super().__init__()
+        self.scene_id = scene_id
+        self.scene_text = scene_text
+
+    def process(self):
+        try:
+            from ai_utils import analyze_style
+            commentary = analyze_style(self.scene_text)
+            self.finished.emit(self.scene_id, commentary)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class AIWorker(QThread):
@@ -40,6 +58,7 @@ class AIWorker(QThread):
         self.wait()
 
     def run(self):
+        scene_id = -1
         try:
             self.db_conn = init_db()
             cursor = self.db_conn.cursor()
@@ -82,7 +101,7 @@ class AIWorker(QThread):
 
                     ai_log.info(f'Scene {i%total} ({scene_id}) - {scene_title} - needs review')
                     # Process and save
-                    commentary = ai_ask_commentary(scene_text)
+                    commentary = analyze_style(scene_text)
                     cursor.execute("""
                         INSERT OR REPLACE INTO ai_feedback 
                         (scene_id, feedback_type, feedback_text) 
@@ -103,11 +122,13 @@ class AIWorker(QThread):
                     self.signals.result.emit(scene_id, commentary)
         except Exception as e:
             self.signals.error.emit(f"Scene {scene_id} failed: {str(e)}")
-            ai_log.error(f'Request for scene {i%total} ({scene_id}) - {scene_title} - failed: {str(e)}')
+            if scene_id < 0:
+                ai_log.error(f'AIWorker encountered error before starting loop: {str(e)}')
+            else:
+                ai_log.error(f'Request for scene {i%total} ({scene_id}) - {scene_title} - failed: {str(e)}')
         finally:
              if self.db_conn:
                 self.db_conn.close()
-                self.db_conn = None
 
         self.signals.finished.emit()
 
@@ -121,8 +142,9 @@ class AIEditor(QMainWindow):
         self.current_scene_id = None
         self.current_chapter_scenes = {}
         self.ai_worker = None
-        self.setWindowTitle(" AI Novel Editor")
+        self.worker = None
 
+        self.setWindowTitle(" AI Novel Editor")
         self.setup_ui()
         self.load_structure()
         self.current_scene_id = self.load_last_scene()
@@ -160,10 +182,6 @@ class AIEditor(QMainWindow):
             """, (self.editor.toAnnotatedText(), self.current_scene_id))
             self.db_conn.commit()
             # Modified flag cleared during load_scene_by_id()
-
-    # def _revert_scene(self):
-    #     """Discard changes without confirmation"""
-    #     self.load_scene_by_id(self.current_scene_id)
 
     def setup_ui(self):
         # Add status bar
@@ -224,9 +242,18 @@ class AIEditor(QMainWindow):
         body_layout.addLayout(right_layout)
 
         # Check button with toggle behavior
-        self.check_button = QPushButton("Analyze All")
-        self.check_button.clicked.connect(self.toggle_ai_processing)
-        right_layout.addWidget(self.check_button)
+        analysis_layout = QHBoxLayout()
+        right_layout.addLayout(analysis_layout)
+
+        # Analyze All button
+        self.analyze_all_btn = QPushButton("Analyze All")
+        self.analyze_all_btn.clicked.connect(self.toggle_ai_processing)
+        analysis_layout.addWidget(self.analyze_all_btn)
+
+        # Analyze This button
+        self.analyze_this_btn = QPushButton("Analyze This")
+        self.analyze_this_btn.clicked.connect(self.analyze_current_scene)
+        analysis_layout.addWidget(self.analyze_this_btn)
 
         # Status Combo
         self.status_combo = QComboBox()
@@ -516,7 +543,7 @@ class AIEditor(QMainWindow):
 
     def start_ai_processing(self):
         """Start processing all scenes."""
-        self.check_button.setText("Stop Analysis")
+        self.analyze_all_btn.setText("Stop Analysis")
         self.progress_bar.setRange(0, 100)
         self.statusBar().showMessage("Starting analysis...")
 
@@ -531,7 +558,7 @@ class AIEditor(QMainWindow):
         """Gracefully stop processing."""
         if self.ai_worker:
             self.ai_worker.stop()
-        self.check_button.setText("Analyze All")
+        self.analyze_all_btn.setText("Analyze All")
         self.statusBar().showMessage("Analysis stopped")
 
     def update_progress(self, processed, total, scene_title):
@@ -562,32 +589,81 @@ class AIEditor(QMainWindow):
         result = cursor.fetchone()
         self.commentary_editor.setText(result[0] if result else "")
 
-    def process_ai_commentary(self, scene_text):
-        """Background task for AI processing."""
-        try:
-            comment = ai_ask_commentary(scene_text)
-            
-            cursor = self.db_conn.cursor()
-            cursor.execute("""
-                UPDATE ai_feedback 
-                SET feedback_text = ?, timestamp = CURRENT_TIMESTAMP
-                WHERE scene_id = ? AND feedback_type = 'style'
-            """, (comment, self.current_scene_id))
-            self.db_conn.commit()
-            
-            # Update UI from main thread
-            self.load_commentary.emit() if hasattr(self, 'load_commentary') else None
-        except Exception as e:
-            pq_log.error(f"AI processing failed: {e}")
-
     def ai_processing_finished(self):
         """Handle completion of all scene processing."""
-        self.check_button.setText("Analyze All")
+        self.analyze_all_btn.setText("Analyze All")
         self.statusBar().showMessage("Analysis completed", 3000)
 
     def dispose_ai_worker(self):
         if self.ai_worker and self.ai_worker.isRunning():
             self.ai_worker.quit()
+
+    def analyze_current_scene(self):
+        """Handle single scene analysis"""
+        # Stop any running batch processing
+        self.stop_ai_processing()
+
+        if not self.current_scene_id:
+            self.statusBar().showMessage("No scene selected", 3000)
+            return
+
+        # Store current scene ID to verify later
+        original_scene_id = self.current_scene_id
+        scene_title = self.current_hierarchy[-1] if self.current_hierarchy else "Untitled"
+
+        # Get scene text (using existing method)
+        scene_text = self.editor.toPlainText()
+
+        # Show processing message
+        self.statusBar().showMessage(f"Analyzing scene: {scene_title}...")
+
+        # Create and configure worker thread
+        self.scene_worker = QThread()
+        self.worker = SceneAnalyzer(original_scene_id, scene_text)
+        self.worker.moveToThread(self.scene_worker)
+
+        # Connect signals
+        self.worker.finished.connect(self.handle_scene_analysis_complete)
+        self.worker.error.connect(self.handle_scene_analysis_error)
+        self.scene_worker.started.connect(self.worker.process)
+        self.scene_worker.start()
+
+    def handle_scene_analysis_complete(self, scene_id, commentary):
+        """Handle successful scene analysis with proper DB saving"""
+        try:
+            # Save to database using main connection
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO ai_feedback 
+                (scene_id, feedback_type, feedback_text) 
+                VALUES (?, 'style', ?)
+            """, (scene_id, commentary))
+            cursor.execute("""
+                UPDATE scenes SET revision_status = 'ai_processed'
+                WHERE id = ?
+            """, (scene_id,))
+            self.db_conn.commit()
+
+            # Update UI if still on same scene
+            if scene_id == self.current_scene_id:
+                self.commentary_editor.setText(commentary)
+                self.statusBar().showMessage("✓ Analysis saved", 3000)
+            else:
+                self.statusBar().showMessage("✓ Analysis saved for scene", 3000)
+
+        except sqlite3.Error as e:
+            self.statusBar().showMessage(f"⚠️ Failed to save: {str(e)}", 5000)
+            # Optionally retry or queue for later saving
+        finally:
+            if hasattr(self, 'scene_worker'):
+                self.scene_worker.quit()
+                self.scene_worker.wait()
+
+    def handle_scene_analysis_error(self, error):
+        """Handle analysis errors"""
+        self.scene_worker.quit()
+        self.scene_worker.wait()
+        self.statusBar().showMessage(f"Analysis error: {error}", 5000)
 
     def closeEvent(self, event):
         """Save state when closing."""

@@ -367,8 +367,9 @@ class NovelDocument(QTextDocument):
         self.setAnnotatedText(text)
 
     def toPlainText(self):
-        """Override to force annotated text handling"""
-        return self.toAnnotatedText()
+        """Returns exactly what user sees in editor (with glyphs) as plain text"""
+        # Default QTextDocument.toPlainText() already does what we need
+        return super().toPlainText()
 
 
 class NovelEditor(QTextEdit):
@@ -379,7 +380,6 @@ class NovelEditor(QTextEdit):
 
         # Remove plaintext methods from public API
         self.setPlainText = self._hidden_set_plaintext
-        self.toPlainText = self._hidden_to_plaintext
 
     def _hidden_set_plaintext(self, *args, **kwargs):
         """Prevent direct plaintext access"""
@@ -398,6 +398,17 @@ class NovelEditor(QTextEdit):
         text = self.document().toAnnotatedText()
         if clear_modified:
             self.document().setModified(False)
+
+    def toPlainText(self, annotated_text=None):
+        """
+        Get plain text representation (with glyphs)
+        If annotated_text provided, converts that text without touching document
+        """
+        if annotated_text is not None:
+            temp_doc = NovelDocument()
+            temp_doc.setAnnotatedText(annotated_text)
+            return temp_doc.toPlainText()
+        return self.document().toPlainText()
 
     def maybe_save(self):
         """
