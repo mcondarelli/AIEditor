@@ -29,25 +29,27 @@ class SceneAnalyzer(QObject):
     finished = pyqtSignal(int, str)  # scene_id, commentary
     error = pyqtSignal(str)
 
-    def __init__(self, scene_id, scene_text):
+    def __init__(self, scene_id, scene_text, mode="quick"):
         super().__init__()
         self.scene_id = scene_id
         self.scene_text = scene_text
+        self.mode = mode
 
     def process(self):
         try:
             from ai_utils import analyze_style
-            commentary = analyze_style(self.scene_text)
+            commentary = analyze_style(self.scene_text, self.mode)
             self.finished.emit(self.scene_id, commentary)
         except Exception as e:
             self.error.emit(str(e))
 
 
 class AIWorker(QThread):
-    def __init__(self, start_scene_id, force_reprocess=False):
+    def __init__(self, start_scene_id, force_reprocess=False, mode="thorough"):
         super().__init__()
         self.start_scene_id = start_scene_id
         self.force_reprocess = force_reprocess
+        self.mode = mode
         self.db_conn = None
         self._is_running = True
         self.signals = AIWorkerSignals()
@@ -101,7 +103,7 @@ class AIWorker(QThread):
 
                     ai_log.info(f'Scene {i%total} ({scene_id}) - {scene_title} - needs review')
                     # Process and save
-                    commentary = analyze_style(scene_text)
+                    commentary = analyze_style(scene_text, self.mode)
                     cursor.execute("""
                         INSERT OR REPLACE INTO ai_feedback 
                         (scene_id, feedback_type, feedback_text) 
@@ -544,6 +546,14 @@ class AIEditor(QMainWindow):
     def start_ai_processing(self):
         """Start processing all scenes."""
         self.analyze_all_btn.setText("Stop Analysis")
+        self.statusBar().showMessage("Starting thorough analysis...")
+
+        self.ai_worker = AIWorker(
+            start_scene_id=self.current_scene_id,
+            force_reprocess=True,
+            mode="thorough"  # Explicit thorough mode
+        )
+        self.analyze_all_btn.setText("Stop Analysis")
         self.progress_bar.setRange(0, 100)
         self.statusBar().showMessage("Starting analysis...")
 
@@ -607,6 +617,18 @@ class AIEditor(QMainWindow):
             self.statusBar().showMessage("No scene selected", 3000)
             return
 
+        # UI feedback
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.statusBar().showMessage("Quick analyzing scene...")
+
+        # Setup worker with quick mode
+        self.scene_worker = QThread()
+        self.worker = SceneAnalyzer(
+            scene_id=self.current_scene_id,
+            scene_text=self.editor.toPlainText(),
+            mode="quick"  # Explicit quick mode
+        )
+
         # Store current scene ID to verify later
         original_scene_id = self.current_scene_id
         scene_title = self.current_hierarchy[-1] if self.current_hierarchy else "Untitled"
@@ -627,6 +649,14 @@ class AIEditor(QMainWindow):
         self.worker.error.connect(self.handle_scene_analysis_error)
         self.scene_worker.started.connect(self.worker.process)
         self.scene_worker.start()
+
+        # Add progress indicator
+        self.progress_bar.setRange(0, 0)  # Indeterminate mode
+        self.statusBar().showMessage(f"Analyzing scene (this may take several minutes)...")
+
+        # Disable buttons during processing
+        self.analyze_this_btn.setEnabled(False)
+        self.analyze_all_btn.setEnabled(False)
 
     def handle_scene_analysis_complete(self, scene_id, commentary):
         """Handle successful scene analysis with proper DB saving"""
@@ -655,6 +685,11 @@ class AIEditor(QMainWindow):
             self.statusBar().showMessage(f"⚠️ Failed to save: {str(e)}", 5000)
             # Optionally retry or queue for later saving
         finally:
+            # Restore UI state
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.analyze_this_btn.setEnabled(True)
+            self.analyze_all_btn.setEnabled(True)
             if hasattr(self, 'scene_worker'):
                 self.scene_worker.quit()
                 self.scene_worker.wait()

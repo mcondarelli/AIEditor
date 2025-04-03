@@ -75,25 +75,32 @@ Return only the translation without additional commentary.
 """
 
 
-def _make_llama_request(prompt: str, params: Optional[Dict] = None) -> Optional[str]:
+def _make_llama_request(prompt: str, mode: str = "quick") -> Optional[str]:
     """Generic function to handle llama.cpp requests"""
+    params = {
+        "thorough": {
+            "temperature": 0.7,
+            "top_k": 50,
+            "top_p": 0.9,
+            "n_predict": 512
+        },
+        "quick": {
+            "temperature": 0.7,
+            "top_k": 30,
+            "top_p": 0.8,
+            "n_predict": 256
+        }
+    }
+
     payload = {
         "prompt": prompt,
-        "temperature": 0.7,
-        "top_k": 50,
-        "top_p": 0.9,
-        "n_predict": 512,
-        **(params or {})
+        **params[mode]
     }
 
     try:
         log.debug(f"Sending request to llama.cpp: {payload['prompt'][:100]}...")
         start_time = time.time()
-        response = requests.post(
-            LLAMA_SERVER_URL,
-            json=payload,
-            # timeout=REQUEST_TIMEOUT
-        )
+        response = requests.post(LLAMA_SERVER_URL, json=payload)
         elapsed = time.time()-start_time
         log.debug(f'request took {datetime.timedelta(seconds=elapsed)} ({elapsed} seconds)')
         response.raise_for_status()
@@ -103,10 +110,10 @@ def _make_llama_request(prompt: str, params: Optional[Dict] = None) -> Optional[
         return None
 
 
-def analyze_style(text: str) -> Optional[str]:
+def analyze_style(scene_text: str, mode: str = "quick") -> Optional[str]:
     """Get detailed style analysis of the text"""
-    prompt = STYLE_ANALYSIS_TEMPLATE.format(text=text)
-    return _make_llama_request(prompt)
+    prompt = STYLE_ANALYSIS_TEMPLATE.format(text=scene_text)
+    return _make_llama_request(prompt, mode)
 
 
 def generate_summary(text: str) -> Optional[Dict[str, Any]]:
