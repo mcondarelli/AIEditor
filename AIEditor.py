@@ -1,6 +1,6 @@
 import sqlite3
 import sys
-from PyQt6.QtCore import QSettings, QThread, pyqtSignal, QObject
+from PyQt6.QtCore import QSettings, QThread, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QMainWindow, QHBoxLayout, QComboBox, QVBoxLayout,
                              QPushButton, QTextEdit, QWidget, QLineEdit, QGroupBox,
@@ -121,12 +121,16 @@ class AIEditor(QMainWindow):
         self.current_scene_id = None
         self.current_chapter_scenes = {}
         self.ai_worker = None
-        self.setWindowTitle("AI Novel Editor")
+        self.setWindowTitle(" AI Novel Editor")
 
         self.setup_ui()
         self.load_structure()
         self.current_scene_id = self.load_last_scene()
-        self.load_scene_by_id(self.current_scene_id)
+        if self.current_scene_id:
+            self.current_hierarchy = ['Loading...']
+            self._update_window_title()
+            QTimer.singleShot(100, lambda: self.load_scene_by_id(self.current_scene_id))
+
         # Clean up any existing worker
         self.dispose_ai_worker()
 
@@ -254,16 +258,21 @@ class AIEditor(QMainWindow):
     def load_structure(self):
         """Initialize the navigation hierarchy."""
         self.current_hierarchy = ['NONE']  # Reset if reloading
-        cursor = self.db_conn.cursor()
+        try:
+            cursor = self.db_conn.cursor()
 
-        # Load books
-        cursor.execute("SELECT id, title FROM books ORDER BY id")
-        self.books = {title: book_id for book_id, title in cursor.fetchall()}
-        self.book_combo.addItems(self.books.keys())
+            # Load books
+            cursor.execute("SELECT id, title FROM books ORDER BY id")
+            self.books = {title: book_id for book_id, title in cursor.fetchall()}
+            self.book_combo.addItems(self.books.keys())
 
-        # Trigger initial updates
-        if self.book_combo.count() > 0:
-            self.update_parts(self.book_combo.currentText())
+            # Trigger initial updates
+            if self.book_combo.count() > 0:
+                self.update_parts(self.book_combo.currentText())
+        except Exception as e:
+            pq_log.error(f"Structure loading failed: {e}")
+            self.current_hierarchy = ['Error']
+            self._update_window_title()
 
     def update_parts(self, book_title):
         """Update parts combobox based on selected book."""
@@ -376,6 +385,7 @@ class AIEditor(QMainWindow):
         self.current_hierarchy = (book, part, chapter, scene)
         self.update_commentary_display()  # Load saved commentary
         self.update_nav_buttons()
+        self._update_window_title()
 
     def _update_window_title(self, modified=False):
         base_title = "AI Novel Editor"
@@ -383,9 +393,6 @@ class AIEditor(QMainWindow):
         if scene_title == 'NONE':
             scene_title = "Untitled"
         self.setWindowTitle(f"{'*' if modified else ' '}{base_title} - {scene_title}")
-
-
-        self.setWindowTitle(f"{'*' if modified else ''}AI Novel Editor - {self.current_hierarchy[-1] if self.current_hierarchy else 'NONE'}")
 
     def navigate_to_adjacent_scene(self, direction):
         """Move to previous/next scene in sequence."""
