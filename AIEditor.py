@@ -1,9 +1,12 @@
 import sqlite3
 import sys
 from PyQt6.QtCore import QSettings, QThread, pyqtSignal, QObject
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QMainWindow, QHBoxLayout, QComboBox, QVBoxLayout,
                              QPushButton, QTextEdit, QWidget, QLineEdit, QGroupBox,
                              QApplication, QProgressBar)
+
+from scene_edit import NovelEditor
 from io_utils import export_to_legacy_json
 from ai_utils import ai_ask_commentary
 from logging_config import LoggingConfig
@@ -114,10 +117,11 @@ class AIEditor(QMainWindow):
         super().__init__()
         self.db_conn = init_db()
         self.scene_combos = []
-        self.current_hierarchy = []
+        self.current_hierarchy = ['NONE']
         self.current_scene_id = None
         self.current_chapter_scenes = {}
         self.ai_worker = None
+        self.setWindowTitle("AI Novel Editor")
 
         self.setup_ui()
         self.load_structure()
@@ -126,6 +130,36 @@ class AIEditor(QMainWindow):
         # Clean up any existing worker
         self.dispose_ai_worker()
 
+    def _setup_menubar(self):
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("&File")
+        self.revert_action = QAction("&Revert", self)
+        self.revert_action.triggered.connect(lambda: self.load_scene_by_id(self.current_scene_id))
+        file_menu.addAction(self.revert_action)
+        file_menu.addSeparator()
+        file_menu.addAction("&Exit", self.close)
+        
+        self.editor.document().modificationChanged.connect(
+            lambda changed: self._update_window_title(changed))
+
+    def _save_scene_maybe(self):
+        """Silent auto-save on navigation"""
+        if self.editor.document().isModified():
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                UPDATE scenes 
+                SET content = ?, 
+                    revision_status = 'unprocessed'
+                WHERE id = ?
+            """, (self.editor.toAnnotatedText(), self.current_scene_id))
+            self.db_conn.commit()
+            # Modified flag cleared during load_scene_by_id()
+
+    # def _revert_scene(self):
+    #     """Discard changes without confirmation"""
+    #     self.load_scene_by_id(self.current_scene_id)
 
     def setup_ui(self):
         # Add status bar
@@ -133,7 +167,7 @@ class AIEditor(QMainWindow):
         self.progress_bar = QProgressBar()
         self.statusBar().addPermanentWidget(self.progress_bar)
 
-        self.setWindowTitle("Novel Editor")
+        self.setWindowTitle("AI Novel Editor")
         self.setGeometry(100, 100, 800, 600)
 
         # Central widget and layout
@@ -178,7 +212,7 @@ class AIEditor(QMainWindow):
         button_layout.addWidget(self.next_button)
 
         # Text editor
-        self.editor = QTextEdit()
+        self.editor = NovelEditor()
         left_layout.addWidget(self.editor)
 
         # Right panel (tools)
@@ -213,8 +247,13 @@ class AIEditor(QMainWindow):
         self.chapter_combo.currentTextChanged.connect(self.update_scenes)
         self.scene_combo.currentTextChanged.connect(self.on_scene_selected)
 
+        # Initialize menubar AFTER all UI elements exist
+        self._setup_menubar()
+
+
     def load_structure(self):
         """Initialize the navigation hierarchy."""
+        self.current_hierarchy = ['NONE']  # Reset if reloading
         cursor = self.db_conn.cursor()
 
         # Load books
@@ -330,12 +369,23 @@ class AIEditor(QMainWindow):
             combo.blockSignals(False)
 
         # Update editor and status
-        self.editor.setPlainText(content)
+        self.editor.setAnnotatedText(content)
+        self.editor.document().setModified(False)
         self.status_combo.setCurrentText(status)
         self.current_scene_id = scene_id
         self.current_hierarchy = (book, part, chapter, scene)
         self.update_commentary_display()  # Load saved commentary
         self.update_nav_buttons()
+
+    def _update_window_title(self, modified=False):
+        base_title = "AI Novel Editor"
+        scene_title = self.current_hierarchy[-1]
+        if scene_title == 'NONE':
+            scene_title = "Untitled"
+        self.setWindowTitle(f"{'*' if modified else ' '}{base_title} - {scene_title}")
+
+
+        self.setWindowTitle(f"{'*' if modified else ''}AI Novel Editor - {self.current_hierarchy[-1] if self.current_hierarchy else 'NONE'}")
 
     def navigate_to_adjacent_scene(self, direction):
         """Move to previous/next scene in sequence."""

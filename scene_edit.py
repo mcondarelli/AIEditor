@@ -1,3 +1,4 @@
+# Modified to use Qt's built-in modified state
 from typing import Optional, List
 
 from PyQt6.QtCore import Qt
@@ -173,11 +174,13 @@ class NovelDocument(QTextDocument):
                 cursor.insertText('\n')
 
         cursor.endEditBlock()
+        self.setModified(False)
         log.debug('===================================================')
 
     def toAnnotatedText(self):
         """Convert QTextDocument back to marked-up text with proper nesting"""
         log.debug('================ toAnnotatedText() ================')
+        self.setModified(False)  # Clear on explicit save
         text = []
 
         block = self.begin()
@@ -371,11 +374,8 @@ class NovelDocument(QTextDocument):
 class NovelEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._document = NovelDocument()
-        self.setDocument(self._document)
+        self.setDocument(NovelDocument())
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self._is_dirty = False
-        self._document.contentsChanged.connect(self._mark_dirty)
 
         # Remove plaintext methods from public API
         self.setPlainText = self._hidden_set_plaintext
@@ -391,20 +391,13 @@ class NovelEditor(QTextEdit):
 
     def setAnnotatedText(self, text):
         """Public method for setting annotated text"""
-        self._document.setAnnotatedText(text)
-        self._clear_dirty()
+        self.document().setAnnotatedText(text)
 
-    def toAnnotatedText(self):
+    def toAnnotatedText(self, clear_modified=False):
         """Public method for getting annotated text"""
-        return self._document.toAnnotatedText()
-
-    def _mark_dirty(self):
-        """Mark buffer as modified"""
-        self._is_dirty = True
-
-    def _clear_dirty(self):
-        """Clear dirty flag"""
-        self._is_dirty = False
+        text = self.document().toAnnotatedText()
+        if clear_modified:
+            self.document().setModified(False)
 
     def maybe_save(self):
         """
@@ -414,7 +407,7 @@ class NovelEditor(QTextEdit):
             No - discard changes
             Cancel - abort operation
         """
-        if not self._is_dirty:
+        if not self.document().isModified():
             return QMessageBox.StandardButton.Yes
 
         reply = QMessageBox.question(
@@ -427,7 +420,7 @@ class NovelEditor(QTextEdit):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            if self._document.save_file():
+            if self.document().save_file():
                 self._clear_dirty()
                 return QMessageBox.StandardButton.Yes
             return QMessageBox.StandardButton.Cancel
@@ -445,19 +438,11 @@ class NovelEditor(QTextEdit):
         else:
             event.accept()
 
-    def setPlainText(self, text):
-        """Override to clear dirty flag"""
-        self._document.setAnnotatedText(text)
-        self._clear_dirty()
-
-    def toPlainText(self):
-        return self._document.toAnnotatedText()
-
     def keyPressEvent(self, event):
         # Handle boundary deletions
         if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             cursor = self.textCursor()
-            if self._document.handle_boundary_editing(
+            if self.document().handle_boundary_editing(
                 cursor,
                 event.key() == Qt.Key.Key_Backspace
             ):
@@ -469,7 +454,7 @@ class NovelEditor(QTextEdit):
             cursor = self.textCursor()
             start_pos = cursor.position()
             super().keyPressEvent(event)
-            self._document.validate_inserted_text(start_pos, event.text())
+            self.document().validate_inserted_text(start_pos, event.text())
             return
 
         super().keyPressEvent(event)
@@ -480,7 +465,7 @@ class NovelEditor(QTextEdit):
         start_pos = cursor.position()
         super().insertFromMimeData(source)
         if source.text():
-            self._document.validate_inserted_text(start_pos, source.text())
+            self.document().validate_inserted_text(start_pos, source.text())
 
     def deleteSelectedText(self):
         """Handle selection deletion with glyph protection"""
@@ -489,7 +474,7 @@ class NovelEditor(QTextEdit):
             # Check if selection contains glyphs
             start = cursor.selectionStart()
             end = cursor.selectionEnd()
-            block = self._document.findBlock(start)
+            block = self.document().findBlock(start)
 
             while block.isValid() and block.position() <= end:
                 iterator = block.begin()
@@ -516,17 +501,17 @@ class NovelEditor(QTextEdit):
 
     def _validate_insertion(self, insert_pos, insert_length):
         """Fix text inserted into glyph fragments"""
-        cursor = QTextCursor(self._document)
+        cursor = QTextCursor(self.document())
         cursor.setPosition(insert_pos)
 
         for i in range(insert_length):
             pos = insert_pos + i
             cursor.setPosition(pos)
-            fragment = self._document._get_fragment_at_position(pos)
+            fragment = self.document()._get_fragment_at_position(pos)
 
             if fragment and fragment.charFormat().property(QTextFormat.Property.UserProperty + 2):
                 # Move this character after glyph with proper format
-                char_cursor = QTextCursor(self._document)
+                char_cursor = QTextCursor(self.document())
                 char_cursor.setPosition(pos)
                 char_cursor.movePosition(QTextCursor.MoveOperation.Right,
                                          QTextCursor.MoveMode.KeepAnchor, 1)
@@ -537,15 +522,15 @@ class NovelEditor(QTextEdit):
 
                 # Insert after glyph with context-aware format
                 char_cursor.setPosition(fragment.position() + fragment.length())
-                fmt = self._document.get_format_for_insertion(char_cursor.position())
+                fmt = self.document().get_format_for_insertion(char_cursor.position())
                 char_cursor.insertText(text, fmt)
                 char_cursor.endEditBlock()
 
     def _get_format_at_position(self, pos):
         """Get character format at given position"""
-        cursor = QTextCursor(self._document)
+        cursor = QTextCursor(self.document())
         cursor.setPosition(pos)
-        if pos < self._document.characterCount() - 1:
+        if pos < self.document().characterCount() - 1:
             cursor.movePosition(QTextCursor.MoveOperation.Right,
                                 QTextCursor.MoveMode.KeepAnchor, 1)
             return cursor.charFormat()
