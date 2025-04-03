@@ -9,7 +9,7 @@ from logging_config import LoggingConfig
 
 log = LoggingConfig.get_logger('edit', _default=4)
 
-SPECIAL_NAMES = ['Afro', 'Isto', 'Thano', 'Posse', 'Zeo', 'Palla', 'Dionne', 'Dana', 'Fest', 'Ipno', 'Asclep', 'Opia']
+SPECIAL_NAMES = ['afro', 'isto', 'thano', 'posse', 'zeo', 'palla', 'dionne', 'dana', 'fest', 'ipno', 'asclep', 'opia']
 
 
 class Construct:
