@@ -4,7 +4,7 @@ import datetime
 import requests
 import json
 from typing import Optional, Dict, Any
-from logging_config import LoggingConfig
+from utils.logging_config import LoggingConfig
 
 log = LoggingConfig.get_logger('_AI_', _default=4)
 

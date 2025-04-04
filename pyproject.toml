@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["AIEditor"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["utils*", "ai*", "scene_edit*"]
+
+[project]
+name = "aieditor"
+version = "0.1.0"
+packages = ["app", "utils", "ai", "scene_edit"]
+authors = [
+    {name = "Mauro Condarelli", email = "mc5686@mclink.it"},
+]
+description = "A text editor geared toward literature writing with AI editing help"
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "PyQt6==6.8.1",
+    "PyQt6_sip==13.10.0",
+    "Requests==2.32.3",
+]
+
+[project.scripts]
+aieditor = "app.main:main"

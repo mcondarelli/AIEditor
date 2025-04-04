@@ -6,10 +6,10 @@ from PyQt6.QtWidgets import (QMainWindow, QHBoxLayout, QComboBox, QVBoxLayout,
                              QPushButton, QTextEdit, QWidget, QLineEdit, QGroupBox,
                              QApplication, QProgressBar)
 
-from scene_edit import NovelEditor
-from io_utils import export_to_legacy_json
-from ai_utils import analyze_style
-from logging_config import LoggingConfig
+from scene_edit.scene_edit import NovelEditor
+from utils.io import export_to_legacy_json
+from ai.core import analyze_style
+from utils.logging_config import LoggingConfig
 from schema import init_db
 
 COMPANY = 'MCondarelli'
@@ -37,7 +37,6 @@ class SceneAnalyzer(QObject):
 
     def process(self):
         try:
-            from ai_utils import analyze_style
             commentary = analyze_style(self.scene_text, self.mode)
             self.finished.emit(self.scene_id, commentary)
         except Exception as e:
