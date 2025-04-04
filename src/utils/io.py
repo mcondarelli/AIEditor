@@ -2,7 +2,7 @@
 import json
 import sqlite3
 
-from logging_config import LoggingConfig
+from utils.logging_config import LoggingConfig
 
 log = LoggingConfig.get_logger('_DB_', _default=4)
 

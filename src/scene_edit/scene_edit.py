@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextDocument, QTextCursor, QTextCharFormat, QTextFormat, QFont, QIcon
 from PyQt6.QtWidgets import QApplication, QTextEdit, QFileDialog, QMessageBox
 
-from logging_config import LoggingConfig
+from utils.logging_config import LoggingConfig
 
 log = LoggingConfig.get_logger('edit', _default=4)
 

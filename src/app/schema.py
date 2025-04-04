@@ -1,7 +1,7 @@
 # schema.py
 import sqlite3
 
-from io_utils import import_from_legacy_json
+from utils.io import import_from_legacy_json
 
 
 def init_db(db_path="AIEditor.sqlite3"):
@@ -72,6 +72,10 @@ def init_db(db_path="AIEditor.sqlite3"):
     conn.commit()
 
     if is_new:
-        import_from_legacy_json(conn, '../Cronache_della_Nuova_Terra.json')
+        from pathlib import Path
+        json_path = Path.home() / "Documents" / "Jona" / "wordpress" / 'Cronache_della_Nuova_Terra.json'
+        if not json_path.exists():
+            raise FileNotFoundError(f"Required file not found at: {json_path}")
+        import_from_legacy_json(conn, str(json_path))
 
     return conn

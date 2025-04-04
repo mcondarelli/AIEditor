@@ -1,2 +1,5 @@
-.attic
+.idea/
+.attic/
 *.sqlite3
+venv/
+__pycache__/
