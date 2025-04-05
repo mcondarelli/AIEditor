@@ -1,4 +1,5 @@
-# AIEditor
+# AIEditor - Novel Analysis Toolkit
+
 
 ## Purpose
 
@@ -15,6 +16,14 @@ This is currently WIP I use to polish a long (~900 pages) novel I'm writing and,
 features I'll implement on a "when needed" basis.
 
 ## Architecture
+```mermaid
+flowchart LR
+    A[AIEditor Client] <-HTTP-> B[AIEditorServer]
+    B <-SQL-> C[(SQLite DB)]
+    B --> D[ChromaDB]
+    B --> E[Local LLMs]
+```
+
 
 ### Data
 
