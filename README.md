@@ -18,10 +18,10 @@ features I'll implement on a "when needed" basis.
 ## Architecture
 ```mermaid
 flowchart LR
-    A[AIEditor Client] <-HTTP-> B[AIEditorServer]
-    B <-SQL-> C[(SQLite DB)]
-    B --> D[ChromaDB]
-    B --> E[Local LLMs]
+    A[AIEditor Client] -- HTTP --> B[AIEditorServer];
+    B -- SQL --> C[(SQLite DB)];
+    B --> D[ChromaDB];
+    B --> E[Local LLMs];
 ```
 
 
@@ -116,29 +116,30 @@ Program is composed by three main sections:
 ##### TODO List
 
 1. Structure
-    1. Main Window
-        1. [ ]  Dialog to change default visuals
-            1. [ ] at least default font and pitch
-            2. [ ] possibly full theming
-        2. [ ] move [Prev] and [Next] buttons top bar on the sides of crumb bar, something like:
+    - 1.1. Main Window
+        - [ ] 1.1.1. Dialog to change default visuals
+            - [ ] 1.1.1.1. at least default font and pitch
+            - [ ] 1.1.1.2. possibly full theming
+        - [ ] 1.1.2. move [Prev] and [Next] buttons top bar on the sides of crumb bar, something like:
            
-           `[Prev] - [  Book  v][  Part  v][Chapter v][  Scene v] - [Next]`
-        3. [ ] Use splitter to separate left(edit) and right(info) panes
-        4. [ ] Splitter should be completely collapsable to allow undisturbed edit
-        5. [ ] Use Tab widget on right pane to hold different kind of information, at least:
-            1. [ ] Edit info (chapter and scene summary, character/place/object summary)
-            2. [ ] Review info (chapter and scene commentary)
-            3. [ ] Translation (original text, AI tips)
-            4. [ ] Export (TBD) 
-    2. SceneEdit
-        1. [ ] highlighting of character, object and place names.
-        2. [ ] context menu to mark word as name.
-        3. [ ] spellcheck (intelligent? is it fast enough?) with squiggly underline.
+             `[Prev] - [  Book  v][  Part  v][Chapter v][  Scene v] - [Next]`
+        - [ ] 1.1.3. Use splitter to separate left(edit) and right(info) panes
+        - [ ] 1.1.4. Splitter should be completely collapsable to allow undisturbed edit
+        - [ ] 1.1.5. Use Tab widget on right pane to hold different kind of information, at least:
+            - [ ] 1.1.5.1 Edit info (chapter and scene summary, character/place/object summary)
+            - [ ] 1.1.5.2 Review info (chapter and scene commentary)
+            - [ ] 1.1.5.3 Translation (original text, AI tips)
+            - [ ] 1.1.5.4 Export (TBD) 
+    - 1.2. SceneEdit
+        - [ ] 1.2.1. highlighting of character, object and place names.
+        - [ ] 1.2.2. context menu to mark word as name.
+        - [ ] 1.2.3. spellcheck (intelligent? is it fast enough?) with squiggly underline.
+        - [ ] 1.2.4. modify "Attributed quotes" construct to accept character names (limit choice to characters active in the scene).
 2. AI Requests
-    1. [ ] Scene-level commentary (current scene and batch)
-    2. [ ] Scene-level export to semantic database (current scene and batch)
-    3. [ ] Scene-level  summary (from SD)
-    4. [ ] Chapter-level summary (from SD)
-    5. [ ] Chapter-level commentary with style and coherence test
-    6. [ ] Character coherence
-    7. [ ] Book-level commentary with style and coherence test
+    - [ ] 2.1. Scene-level commentary (current scene and batch)
+    - [ ] 2.2. Scene-level export to semantic database (current scene and batch)
+    - [ ] 2.3. Scene-level  summary (from SD)
+    - [ ] 2.4. Chapter-level summary (from SD)
+    - [ ] 2.5. Chapter-level commentary with style and coherence test
+    - [ ] 2.6. Character coherence
+    - [ ] 2.7. Book-level commentary with style and coherence test
