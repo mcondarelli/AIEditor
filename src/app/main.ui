@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1132</width>
+    <height>802</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>AI Novel Editor</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <layout class="QHBoxLayout" name="_6" stretch="0,1,1,1,1,0">
+      <item>
+       <widget class="QPushButton" name="prev_button">
+        <property name="text">
+         <string>Prev</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="book_combo"/>
+      </item>
+      <item>
+       <widget class="QComboBox" name="part_combo"/>
+      </item>
+      <item>
+       <widget class="QComboBox" name="chapter_combo"/>
+      </item>
+      <item>
+       <widget class="QComboBox" name="scene_combo"/>
+      </item>
+      <item>
+       <widget class="QPushButton" name="next_button">
+        <property name="text">
+         <string>Next</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="_2">
+      <item>
+       <layout class="QVBoxLayout" name="_3">
+        <item>
+         <widget class="NovelEditor" name="editor"/>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QVBoxLayout" name="_4">
+        <item>
+         <layout class="QHBoxLayout" name="_5">
+          <item>
+           <widget class="QPushButton" name="analyze_all_btn">
+            <property name="text">
+             <string>Analyze All</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="analyze_this_btn">
+            <property name="text">
+             <string>Analyze This</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="deepseek_btn">
+            <property name="text">
+             <string>DeepSeek Analysis</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QComboBox" name="status_combo"/>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="search_field">
+          <property name="placeholderText">
+           <string>Search in scene</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupBox">
+          <property name="title">
+           <string>Commentary</string>
+          </property>
+          <layout class="QVBoxLayout" name="commentary_layout">
+           <item>
+            <widget class="QTextEdit" name="commentary_editor"/>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="status_bar">
+   <property name="sizeGripEnabled">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QMenuBar" name="menu_bar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1132</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menu_File">
+    <property name="title">
+     <string>&amp;File</string>
+    </property>
+    <addaction name="actionRevert"/>
+    <addaction name="separator"/>
+    <addaction name="actionExit"/>
+   </widget>
+   <addaction name="menu_File"/>
+  </widget>
+  <action name="actionRevert">
+   <property name="text">
+    <string>&amp;Revert</string>
+   </property>
+  </action>
+  <action name="actionExit">
+   <property name="text">
+    <string>&amp;Exit</string>
+   </property>
+  </action>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>NovelEditor</class>
+   <extends>QTextEdit</extends>
+   <header>scene_edit.scene_edit</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

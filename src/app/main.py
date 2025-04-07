@@ -1,10 +1,14 @@
 import sqlite3
 import sys
+from pathlib import Path
+
 from PyQt6.QtCore import QSettings, QThread, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QMainWindow, QHBoxLayout, QComboBox, QVBoxLayout,
                              QPushButton, QTextEdit, QWidget, QLineEdit, QGroupBox,
                              QApplication, QProgressBar)
+from PyQt6.uic import loadUi, loadUiType
+from qt6_tools.entrypoints import qt_tools
 
 from scene_edit.scene_edit import NovelEditor
 from utils.io import export_to_legacy_json
@@ -16,6 +20,20 @@ COMPANY = 'MCondarelli'
 PROGRAM = 'AIEditor'
 pq_log = LoggingConfig.get_logger('PyQt', _default=4)
 ai_log = LoggingConfig.get_logger('_AI_', _default=4)
+
+# Ensure src is in Python path
+SRC_DIR = Path(__file__).parent.parent  # Goes from app/ to src/
+if str(SRC_DIR) not in sys.path:
+    print(f'Directory "{SRC_DIR}" was added to sys.path')
+    sys.path.insert(0, str(SRC_DIR))
+else:
+    print(f'Directory "{SRC_DIR}" was already in sys.path')
+
+
+# Load UI after path configuration
+# Ui_MainWindow, QtBaseClass = loadUiType(str(Path(__file__).parent / "main.ui"))
+# print(f'Ui_MainWindow: {Ui_MainWindow} -- QtBaseClass: {QtBaseClass}')
+
 
 
 class AIWorkerSignals(QObject):
@@ -104,8 +122,8 @@ class AIWorker(QThread):
                     # Process and save
                     commentary = analyze_style(scene_text, self.mode)
                     cursor.execute("""
-                        INSERT OR REPLACE INTO ai_feedback 
-                        (scene_id, feedback_type, feedback_text) 
+                        INSERT OR REPLACE INTO ai_feedback
+                        (scene_id, feedback_type, feedback_text)
                         VALUES (?, 'style', ?)
                     """, (scene_id, commentary))
                     self.db_conn.commit()
@@ -145,8 +163,54 @@ class AIEditor(QMainWindow):
         self.ai_worker = None
         self.worker = None
 
+        # --- AUTO-GENERATED from UI file - DO NOT EDIT ---
+        from typing import Optional
+        from PyQt6.QtWidgets import QComboBox, QLineEdit, QMainWindow, QMenu, QMenuBar, QPushButton, QStatusBar, QTextEdit, QWidget
+        from scene_edit.scene_edit import NovelEditor
+        
+        self.MainWindow: Optional[QMainWindow] = None
+        self.analyze_all_btn: Optional[QPushButton] = None
+        self.analyze_this_btn: Optional[QPushButton] = None
+        self.book_combo: Optional[QComboBox] = None
+        self.centralwidget: Optional[QWidget] = None
+        self.chapter_combo: Optional[QComboBox] = None
+        self.commentary_editor: Optional[QTextEdit] = None
+        self.deepseek_btn: Optional[QPushButton] = None
+        self.editor: Optional[NovelEditor] = None
+        self.menu_File: Optional[QMenu] = None
+        self.menubar: Optional[QMenuBar] = None
+        self.next_button: Optional[QPushButton] = None
+        self.part_combo: Optional[QComboBox] = None
+        self.prev_button: Optional[QPushButton] = None
+        self.scene_combo: Optional[QComboBox] = None
+        self.search_field: Optional[QLineEdit] = None
+        self.status_combo: Optional[QComboBox] = None
+        self.statusbar: Optional[QStatusBar] = None
+        # --- END AUTO-GENERATED ---
+        loadUi(str(Path(__file__).with_suffix('.ui')), self)
+        self.scene_combos = [self.book_combo, self.part_combo,
+                             self.chapter_combo, self.scene_combo]
+
+        # Populate Status bar
+        self.statusBar().showMessage("Ready")
+        self.progress_bar = QProgressBar()
+        self.statusBar().addPermanentWidget(self.progress_bar)
+
+        # Connect signals after UI setup
+        self.prev_button.clicked.connect(lambda: self.navigate_to_adjacent_scene("prev"))
+        self.next_button.clicked.connect(lambda: self.navigate_to_adjacent_scene("next"))
+        self.analyze_all_btn.clicked.connect(self.toggle_ai_processing)
+        self.analyze_this_btn.clicked.connect(self.analyze_current_scene)
+
+        self.book_combo.currentTextChanged.connect(self.update_parts)
+        self.part_combo.currentTextChanged.connect(self.update_chapters)
+        self.chapter_combo.currentTextChanged.connect(self.update_scenes)
+        self.scene_combo.currentTextChanged.connect(self.on_scene_selected)
+
+        # Initialize menubar AFTER all UI elements exist
+        self._setup_menubar()
+
         self.setWindowTitle(" AI Novel Editor")
-        self.setup_ui()
         self.load_structure()
         self.current_scene_id = self.load_last_scene()
         if self.current_scene_id:
@@ -159,7 +223,7 @@ class AIEditor(QMainWindow):
 
     def _setup_menubar(self):
         menubar = self.menuBar()
-        
+
         # File menu
         file_menu = menubar.addMenu("&File")
         self.revert_action = QAction("&Revert", self)
@@ -167,7 +231,7 @@ class AIEditor(QMainWindow):
         file_menu.addAction(self.revert_action)
         file_menu.addSeparator()
         file_menu.addAction("&Exit", self.close)
-        
+
         self.editor.document().modificationChanged.connect(
             lambda changed: self._update_window_title(changed))
 
@@ -176,112 +240,13 @@ class AIEditor(QMainWindow):
         if self.editor.document().isModified():
             cursor = self.db_conn.cursor()
             cursor.execute("""
-                UPDATE scenes 
-                SET content = ?, 
+                UPDATE scenes
+                SET content = ?,
                     revision_status = 'unprocessed'
                 WHERE id = ?
             """, (self.editor.toAnnotatedText(), self.current_scene_id))
             self.db_conn.commit()
             # Modified flag cleared during load_scene_by_id()
-
-    def setup_ui(self):
-        # Add status bar
-        self.statusBar().showMessage("Ready")
-        self.progress_bar = QProgressBar()
-        self.statusBar().addPermanentWidget(self.progress_bar)
-
-        self.setWindowTitle("AI Novel Editor")
-        self.setGeometry(100, 100, 800, 600)
-
-        # Central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout()
-        central_widget.setLayout(layout)
-
-        # Navigation comboboxes
-        crumb_layout = QHBoxLayout()
-        layout.addLayout(crumb_layout)
-
-        self.book_combo = QComboBox()
-        self.part_combo = QComboBox()
-        self.chapter_combo = QComboBox()
-        self.scene_combo = QComboBox()
-
-        self.scene_combos = [self.book_combo, self.part_combo,
-                             self.chapter_combo, self.scene_combo]
-
-        for combo in self.scene_combos:
-            crumb_layout.addWidget(combo)
-
-        # Main content area
-        body_layout = QHBoxLayout()
-        layout.addLayout(body_layout)
-
-        # Left panel (editor)
-        left_layout = QVBoxLayout()
-        body_layout.addLayout(left_layout)
-
-        # Navigation buttons
-        button_layout = QHBoxLayout()
-        left_layout.addLayout(button_layout)
-
-        self.prev_button = QPushButton("Prev")
-        self.prev_button.clicked.connect(lambda: self.navigate_to_adjacent_scene("prev"))
-        button_layout.addWidget(self.prev_button)
-
-        self.next_button = QPushButton("Next")
-        self.next_button.clicked.connect(lambda: self.navigate_to_adjacent_scene("next"))
-        button_layout.addWidget(self.next_button)
-
-        # Text editor
-        self.editor = NovelEditor()
-        left_layout.addWidget(self.editor)
-
-        # Right panel (tools)
-        right_layout = QVBoxLayout()
-        body_layout.addLayout(right_layout)
-
-        # Check button with toggle behavior
-        analysis_layout = QHBoxLayout()
-        right_layout.addLayout(analysis_layout)
-
-        # Analyze All button
-        self.analyze_all_btn = QPushButton("Analyze All")
-        self.analyze_all_btn.clicked.connect(self.toggle_ai_processing)
-        analysis_layout.addWidget(self.analyze_all_btn)
-
-        # Analyze This button
-        self.analyze_this_btn = QPushButton("Analyze This")
-        self.analyze_this_btn.clicked.connect(self.analyze_current_scene)
-        analysis_layout.addWidget(self.analyze_this_btn)
-
-        # Status Combo
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(["unreviewed", "ai_processed", "human_approved"])
-        right_layout.addWidget(self.status_combo)
-
-        self.search_field = QLineEdit()
-        self.search_field.setPlaceholderText("Search in scene")
-        right_layout.addWidget(self.search_field)
-
-        # Commentary section
-        self.commentary_box = QGroupBox("Commentary")
-        commentary_layout = QVBoxLayout()
-        self.commentary_editor = QTextEdit()
-        commentary_layout.addWidget(self.commentary_editor)
-        self.commentary_box.setLayout(commentary_layout)
-        right_layout.addWidget(self.commentary_box)
-
-        # Connect signals after UI setup
-        self.book_combo.currentTextChanged.connect(self.update_parts)
-        self.part_combo.currentTextChanged.connect(self.update_chapters)
-        self.chapter_combo.currentTextChanged.connect(self.update_scenes)
-        self.scene_combo.currentTextChanged.connect(self.on_scene_selected)
-
-        # Initialize menubar AFTER all UI elements exist
-        self._setup_menubar()
-
 
     def load_structure(self):
         """Initialize the navigation hierarchy."""
@@ -312,8 +277,8 @@ class AIEditor(QMainWindow):
 
         cursor = self.db_conn.cursor()
         cursor.execute("""
-            SELECT title FROM parts 
-            WHERE book_id = ? 
+            SELECT title FROM parts
+            WHERE book_id = ?
             ORDER BY order_idx
         """, (self.books[book_title],))
 
@@ -333,7 +298,7 @@ class AIEditor(QMainWindow):
 
         cursor = self.db_conn.cursor()
         cursor.execute("""
-            SELECT c.title 
+            SELECT c.title
             FROM chapters c
             JOIN parts p ON c.part_id = p.id
             WHERE p.title = ?
@@ -356,7 +321,7 @@ class AIEditor(QMainWindow):
 
         cursor = self.db_conn.cursor()
         cursor.execute("""
-            SELECT s.id, s.title 
+            SELECT s.id, s.title
             FROM scenes s
             JOIN chapters c ON s.chapter_id = c.id
             WHERE c.title = ?
@@ -479,7 +444,7 @@ class AIEditor(QMainWindow):
         # Check if previous exists
         cursor.execute("""
             SELECT 1 FROM (
-                SELECT s.id, b.id as book_id, p.order_idx as part_order, 
+                SELECT s.id, b.id as book_id, p.order_idx as part_order,
                        c.order_idx as chapter_order, s.order_idx as scene_order
                 FROM scenes s
                 JOIN chapters c ON s.chapter_id = c.id
@@ -491,7 +456,7 @@ class AIEditor(QMainWindow):
                 JOIN chapters c ON s.chapter_id = c.id
                 JOIN parts p ON c.part_id = p.id
                 JOIN books b ON p.book_id = b.id
-                WHERE (b.id, p.order_idx, c.order_idx, s.order_idx) < 
+                WHERE (b.id, p.order_idx, c.order_idx, s.order_idx) <
                       (current.book_id, current.part_order, current.chapter_order, current.scene_order)
             ) AND current.id = ?
         """, (self.current_scene_id,))
@@ -500,7 +465,7 @@ class AIEditor(QMainWindow):
         # Check if previous exists
         cursor.execute("""
             SELECT 1 FROM (
-                SELECT s.id, b.id as book_id, p.order_idx as part_order, 
+                SELECT s.id, b.id as book_id, p.order_idx as part_order,
                        c.order_idx as chapter_order, s.order_idx as scene_order
                 FROM scenes s
                 JOIN chapters c ON s.chapter_id = c.id
@@ -512,7 +477,7 @@ class AIEditor(QMainWindow):
                 JOIN chapters c ON s.chapter_id = c.id
                 JOIN parts p ON c.part_id = p.id
                 JOIN books b ON p.book_id = b.id
-                WHERE (b.id, p.order_idx, c.order_idx, s.order_idx) > 
+                WHERE (b.id, p.order_idx, c.order_idx, s.order_idx) >
                       (current.book_id, current.part_order, current.chapter_order, current.scene_order)
             ) AND current.id = ?
         """, (self.current_scene_id,))
@@ -663,8 +628,8 @@ class AIEditor(QMainWindow):
             # Save to database using main connection
             cursor = self.db_conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO ai_feedback 
-                (scene_id, feedback_type, feedback_text) 
+                INSERT OR REPLACE INTO ai_feedback
+                (scene_id, feedback_type, feedback_text)
                 VALUES (?, 'style', ?)
             """, (scene_id, commentary))
             cursor.execute("""
