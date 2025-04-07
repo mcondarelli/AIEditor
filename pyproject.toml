@@ -12,7 +12,6 @@ include = ["utils*", "ai*", "scene_edit*"]
 [project]
 name = "aieditor"
 version = "0.1.0"
-packages = ["app", "utils", "ai", "scene_edit"]
 authors = [
     {name = "Mauro Condarelli", email = "mc5686@mclink.it"},
 ]
@@ -21,10 +20,25 @@ readme = "README.md"
 requires-python = ">=3.8"
 
 dependencies = [
-    "PyQt6==6.8.1",
+    "PyQt6>=6.5.0",
     "PyQt6_sip==13.10.0",
-    "Requests==2.32.3",
+    "Requests==2.32.3"
 ]
 
 [project.scripts]
 aieditor = "app.main:main"
+
+[project.entry-points."pyqt6_designer_plugins"]
+aieditor_widgets = "scene_edit.designer_plugin:Plugin"
+
+# Add optional dependencies section
+[project.optional-dependencies]
+dev = [
+    "qt6-tools>=6.5.0",       # For designer integration
+    "pytest>=7.0",            # Testing
+    "black>=23.0",            # Formatting
+    "mypy>=1.0"               # Type checking
+]
+designer = [
+    "qt6-tools>=6.5.0"        # Just designer tools
+]
